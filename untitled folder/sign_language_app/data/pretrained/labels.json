@@ -1,0 +1,22 @@
+{
+  "peace": {
+    "samples": 20,
+    "features_file": "peace/features.npy",
+    "feature_length": 63
+  },
+  "hello": {
+    "samples": 20,
+    "features_file": "hello/features.npy",
+    "feature_length": 63
+  },
+  "thumbs_up": {
+    "samples": 20,
+    "features_file": "thumbs_up/features.npy",
+    "feature_length": 63
+  },
+  "point": {
+    "samples": 20,
+    "features_file": "point/features.npy",
+    "feature_length": 63
+  }
+}

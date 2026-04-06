@@ -1,0 +1,12 @@
+{
+  "labels": [
+    "nice_to_meet_you",
+    "thank_you"
+  ],
+  "label_map": {
+    "nice_to_meet_you": 0,
+    "thank_you": 1
+  },
+  "seq_len": 30,
+  "feature_len": 183
+}
