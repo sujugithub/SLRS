@@ -165,7 +165,7 @@ Webcam
   └─► CameraWorker (QThread)
         ├─► HandDetector      ─► 126-D features ─► RandomForest  ─► static sign
         └─► HolisticDetector  ─► 171-D features ─► SequenceCollector (30 frames)
-                                                       └─► MLP Classifier ─► dynamic gesture
+                                                       └─► MLP Classifier
                                                                  │
                                                           SentenceBuffer
                                                                  │

@@ -18,7 +18,6 @@ from PyQt6.QtWidgets import (
 
 from config import (
     CAMERA_WIDTH, CAMERA_HEIGHT, SAMPLES_PER_CLASS,
-    SEQ_LENGTH, MIN_SEQUENCES_PER_SIGN,
 )
 from core.feature_extractor import SpatialFeatureExtractor
 from core.hand_detector import HandDetector
@@ -38,8 +37,6 @@ MAX_IMAGES            = SAMPLES_PER_CLASS
 THUMB_SIZE            = 60
 AUTO_CAPTURE_INTERVAL = 300      # ms between auto-capture ticks
 AUTO_CAPTURE_TARGET   = 30
-MIN_SEQS              = MIN_SEQUENCES_PER_SIGN
-MAX_SEQS              = 30
 
 _CAM_W = 580
 _CAM_H = 435
@@ -57,7 +54,7 @@ _PROG_SS_OK = (
 
 
 class TrainingScreen(QWidget):
-    """Screen for recording static frames and dynamic gesture sequences."""
+    """Screen for recording static frames."""
 
     def __init__(self, on_back=None, on_save=None, on_save_sequences=None,
                  camera=None, detector=None, pose_detector=None,
@@ -81,12 +78,8 @@ class TrainingScreen(QWidget):
         self._shape_printed      = False   # print feature shape once per session
 
         # ── State ────────────────────────────────────────────────────────────
-        self._mode               = "static"
         self._contact_mode       = False   # toggled by 'C' key
         self.captured_features   = []
-        self.captured_seqs       = []
-        self._recording          = False
-        self._record_buffer      = []
         self._current_holistic_feats: np.ndarray | None = None
         self._current_landmarks  = None
         self._current_hand_lms_list: list = []
@@ -208,25 +201,6 @@ class TrainingScreen(QWidget):
         right_lay.setContentsMargins(18, 18, 18, 18)
         right_lay.setSpacing(10)
 
-        # Mode toggle
-        mode_row = QHBoxLayout()
-        mode_row.setSpacing(8)
-        mode_row.addWidget(SectionLabel("Sign Type"))
-        mode_row.addStretch(1)
-        from PyQt6.QtWidgets import QRadioButton
-        self._static_radio  = QRadioButton("Static")
-        self._dynamic_radio = QRadioButton("Dynamic")
-        self._static_radio.setChecked(True)
-        self._static_radio.toggled.connect(
-            lambda chk: chk and self._switch_mode("static"))
-        self._dynamic_radio.toggled.connect(
-            lambda chk: chk and self._switch_mode("dynamic"))
-        mode_row.addWidget(self._static_radio)
-        mode_row.addWidget(self._dynamic_radio)
-        right_lay.addLayout(mode_row)
-
-        right_lay.addWidget(HSep())
-
         # Contact mode indicator
         self._contact_mode_lbl = QLabel("Mode: Normal  [C to toggle]")
         self._contact_mode_lbl.setStyleSheet(
@@ -291,64 +265,6 @@ class TrainingScreen(QWidget):
         cancel_btn.clicked.connect(self._on_back)
         right_lay.addWidget(cancel_btn)
 
-        # ── Dynamic panel (hidden initially) ─────────────────────────────
-        self._dyn_widget = QWidget()
-        self._dyn_widget.setStyleSheet("background: transparent;")
-        dyn_lay = QVBoxLayout(self._dyn_widget)
-        dyn_lay.setContentsMargins(0, 0, 0, 0)
-        dyn_lay.setSpacing(8)
-
-        seq_row = QHBoxLayout()
-        seq_row.addWidget(SectionLabel("Sequences"))
-        seq_row.addStretch(1)
-        self._seq_count_lbl = QLabel(f"0 / {MIN_SEQS} min")
-        self._seq_count_lbl.setStyleSheet(
-            f"font-size: 12px; font-weight: 600; color: {TEXT_PRIMARY};"
-            f" font-family: 'Courier New', monospace;"
-            " background: transparent; border: none;")
-        seq_row.addWidget(self._seq_count_lbl)
-        dyn_lay.addLayout(seq_row)
-
-        self._rec_bar = QProgressBar()
-        self._rec_bar.setFixedHeight(4)
-        self._rec_bar.setRange(0, SEQ_LENGTH)
-        self._rec_bar.setValue(0)
-        self._rec_bar.setTextVisible(False)
-        self._rec_bar.setStyleSheet(_PROG_SS)
-        dyn_lay.addWidget(self._rec_bar)
-
-        self._rec_status_lbl = QLabel(
-            f"Hold gesture and click Record ({SEQ_LENGTH} frames each)")
-        self._rec_status_lbl.setWordWrap(True)
-        self._rec_status_lbl.setStyleSheet(
-            f"font-size: 10px; color: {TEXT_HINT};"
-            f" font-family: 'Courier New', monospace;"
-            " background: transparent; border: none;")
-        dyn_lay.addWidget(self._rec_status_lbl)
-
-        self._record_btn = PillButton("⏺  RECORD SEQUENCE", color=ACCENT)
-        self._record_btn.clicked.connect(self._on_record)
-        dyn_lay.addWidget(self._record_btn)
-
-        dyn_lay.addWidget(HSep())
-
-        self._dyn_save_btn = PillButton("SAVE & TRAIN LSTM ✓", color=SUCCESS,
-                                        text_color="#0d1a11")
-        self._dyn_save_btn.clicked.connect(self._on_save_dynamic)
-        self._dyn_save_btn.setEnabled(False)
-        dyn_lay.addWidget(self._dyn_save_btn)
-
-        self._dyn_hint_lbl = QLabel(
-            f"Record at least {MIN_SEQS} sequences to unlock Save")
-        self._dyn_hint_lbl.setWordWrap(True)
-        self._dyn_hint_lbl.setStyleSheet(
-            f"font-size: 10px; color: {TEXT_HINT};"
-            f" font-family: 'Courier New', monospace;"
-            " background: transparent; border: none;")
-        dyn_lay.addWidget(self._dyn_hint_lbl)
-
-        self._dyn_widget.setVisible(False)
-        right_lay.addWidget(self._dyn_widget)
         right_lay.addStretch(1)
 
         body_lay.addWidget(right_card, 0)
@@ -402,9 +318,6 @@ class TrainingScreen(QWidget):
     def reset(self):
         self._stop_auto_capture()
         self.captured_features.clear()
-        self.captured_seqs.clear()
-        self._record_buffer.clear()
-        self._recording = False
         self._current_landmarks = None
         self._current_hand_lms_list = []
         self._current_pose_lms = None
@@ -417,9 +330,7 @@ class TrainingScreen(QWidget):
             if item.widget():
                 item.widget().deleteLater()
         self._update_count()
-        self._update_seq_count()
         self._save_btn.setEnabled(False)
-        self._dyn_save_btn.setEnabled(False)
         self._auto_status.setText(
             f"Press Start — captures {AUTO_CAPTURE_TARGET} frames")
         self._auto_status.setStyleSheet(
@@ -428,7 +339,7 @@ class TrainingScreen(QWidget):
             " background: transparent; border: none;")
 
     def has_unsaved_data(self) -> bool:
-        return bool(self.captured_features) or bool(self.captured_seqs)
+        return bool(self.captured_features)
 
     def cleanup(self):
         self._stop_camera()
@@ -508,35 +419,6 @@ class TrainingScreen(QWidget):
             self._cam_card.setStyleSheet(
                 f"background-color: {BG_SURFACE};"
                 f" border: 1px solid {HAIR};")
-
-        if self._mode == "dynamic" and self._recording:
-            if self._current_holistic_feats is not None:
-                self._record_buffer.append(self._current_holistic_feats.copy())
-                progress = len(self._record_buffer)
-                self._rec_bar.setValue(progress)
-                remaining = SEQ_LENGTH - progress
-                self._rec_status_lbl.setText(
-                    f"Recording… {remaining} frames remaining")
-                self._rec_status_lbl.setStyleSheet(
-                    f"font-size: 10px; color: {ACCENT};"
-                    f" font-family: 'Courier New', monospace;"
-                    " background: transparent; border: none;")
-                if progress >= SEQ_LENGTH:
-                    seq = np.array(
-                        self._record_buffer[:SEQ_LENGTH], dtype=np.float32)
-                    self.captured_seqs.append(seq)
-                    self._record_buffer.clear()
-                    self._recording = False
-                    self._record_btn.setEnabled(True)
-                    self._update_seq_count()
-                    self._cam_card.setStyleSheet(
-                        f"background-color: {BG_SURFACE};"
-                        f" border: 1px solid {lerp(BG_BORDER, SUCCESS, 0.6)};")
-                    QTimer.singleShot(
-                        300,
-                        lambda: self._cam_card.setStyleSheet(
-                            f"background-color: {BG_SURFACE};"
-                            f" border: 1px solid {HAIR};"))
 
     # ── Auto-capture ──────────────────────────────────────────────────────────
     def _toggle_auto_capture(self):
@@ -658,93 +540,6 @@ class TrainingScreen(QWidget):
         else:
             self._progress_bar.setStyleSheet(_PROG_SS)
 
-    def _update_seq_count(self):
-        n = len(self.captured_seqs)
-        self._seq_count_lbl.setText(f"{n} / {MIN_SEQS} min")
-        if n >= MIN_SEQS:
-            self._dyn_save_btn.setEnabled(True)
-            self._dyn_hint_lbl.setText(
-                f"{n} sequences — ready to train LSTM!")
-            self._dyn_hint_lbl.setStyleSheet(
-                f"font-size: 10px; color: {SUCCESS};"
-                f" font-family: 'Courier New', monospace;"
-                " background: transparent; border: none;")
-        else:
-            self._dyn_hint_lbl.setText(
-                f"Record {MIN_SEQS - n} more to unlock Save")
-            self._dyn_hint_lbl.setStyleSheet(
-                f"font-size: 10px; color: {TEXT_HINT};"
-                f" font-family: 'Courier New', monospace;"
-                " background: transparent; border: none;")
-
-    # ── Mode switching ────────────────────────────────────────────────────────
-    def _switch_mode(self, mode: str):
-        self._mode = mode
-        if mode == "dynamic":
-            self._stop_auto_capture()
-            self._init_holistic()
-            if self._worker is not None:
-                self._worker.stop_capture()
-                self._worker = CameraWorker(
-                    camera=self._camera,
-                    detector=self._detector,
-                    holistic=self._holistic,
-                    pose_detector=self._pose_detector,
-                    parent=self,
-                )
-                self._worker.frame_ready.connect(self._on_frame_ready)
-                self._worker.start_capture()
-            self._start_btn.setVisible(False)
-            self._auto_status.setVisible(False)
-            self._save_btn.setVisible(False)
-            self._dyn_widget.setVisible(True)
-            self._update_seq_count()
-        else:
-            self._dyn_widget.setVisible(False)
-            self._start_btn.setVisible(True)
-            self._auto_status.setVisible(True)
-            self._save_btn.setVisible(True)
-
-    def _init_holistic(self):
-        if self._holistic is not None:
-            return
-        try:
-            from core.holistic_detector import HolisticDetector
-            self._holistic = HolisticDetector()
-            self._owns_holistic = True
-            print("[TrainingScreen] Holistic detector initialised")
-        except Exception as exc:
-            QMessageBox.critical(
-                self, "Holistic Model Error",
-                f"Could not load holistic detector:\n{exc}\n\n"
-                "Falling back to Static mode.")
-            self._static_radio.setChecked(True)
-            self._mode = "static"
-
-    # ── Record ────────────────────────────────────────────────────────────────
-    def _on_record(self):
-        if self._holistic is None:
-            QMessageBox.information(
-                self, "Not Ready", "Holistic detector is not initialised.")
-            return
-        if len(self.captured_seqs) >= MAX_SEQS:
-            QMessageBox.information(
-                self, "Maximum Reached",
-                f"You have recorded {MAX_SEQS} sequences.\n"
-                "Click Save & Train LSTM to continue.")
-            return
-        self._recording = True
-        self._record_buffer.clear()
-        self._record_btn.setEnabled(False)
-        self._rec_bar.setValue(0)
-        self._rec_status_lbl.setText(
-            f"Recording… {SEQ_LENGTH} frames remaining")
-        self._rec_status_lbl.setStyleSheet(
-            f"font-size: 10px; color: {ACCENT};"
-            f" font-family: 'Courier New', monospace;"
-            " background: transparent; border: none;")
-        print("[TrainingScreen] Recording started")
-
     # ── Save ──────────────────────────────────────────────────────────────────
     @staticmethod
     def _sanitize_name(raw: str) -> str:
@@ -771,23 +566,6 @@ class TrainingScreen(QWidget):
         self._stop_camera()
         if self.on_save:
             self.on_save(sign_name, self.captured_features)
-
-    def _on_save_dynamic(self):
-        sign_name = self._sanitize_name(self._name_entry.text())
-        if not sign_name:
-            QMessageBox.warning(
-                self, "Invalid Name",
-                "Please enter a sign name (letters, numbers, spaces).")
-            return
-        if len(self.captured_seqs) < MIN_SEQS:
-            QMessageBox.warning(
-                self, "Not Enough Sequences",
-                f"Record at least {MIN_SEQS} sequences.\n"
-                f"Current: {len(self.captured_seqs)}")
-            return
-        self._stop_camera()
-        if self.on_save_sequences:
-            self.on_save_sequences(sign_name, list(self.captured_seqs))
 
     def _on_back(self):
         self._stop_auto_capture()
