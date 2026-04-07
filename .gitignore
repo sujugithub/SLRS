@@ -22,7 +22,6 @@ env/
 *.task
 
 # Data directories (user-recorded training data)
-data/custom/
 data/sequences/
 
 # Logs
