@@ -22,6 +22,7 @@ from core.camera_worker import CameraWorker
 from core.sentence_buffer import SentenceBuffer
 from core.nlp_processor import RuleBasedNLP
 from core.sequence_collector import SequenceCollector
+from core.temporal_smoother import TemporalSmoother
 from gui.design import (
     ACCENT, BG_BASE, BG_BORDER, BG_DEEP, BG_ELEVATED, BG_SURFACE, BG_FLOAT,
     DANGER, SUCCESS, WARNING, TEXT_HINT, TEXT_PRIMARY, TEXT_SEC, TEXT_TITLE,
@@ -30,8 +31,7 @@ from gui.design import (
     SectionLabel, StatusDot, cv2_to_qpixmap, lerp,
 )
 
-CONFIDENCE_THRESHOLD = 0.50
-AUTO_ADD_FRAMES      = 30
+AUTO_ADD_FRAMES      = 10
 COOLDOWN_FRAMES      = 60
 _LSTM_THRESHOLD      = 0.55
 
@@ -70,6 +70,14 @@ class PredictionScreen(QWidget):
         self._seq_collector     = SequenceCollector(seq_len=30)
         self._spatial_extractor = SpatialFeatureExtractor()
 
+        # Settings-driven knobs (overwritten by apply_settings).
+        self._confidence_threshold = 0.6
+        self._smoothing_window     = 5
+        self._smoother             = TemporalSmoother(
+            window=self._smoothing_window, min_vote_share=0.55,
+        )
+        self._phrase_matcher = None  # set via set_phrase_matcher()
+
         # Camera worker (replaces QTimer camera loop).
         self._worker: CameraWorker | None = None
 
@@ -90,12 +98,6 @@ class PredictionScreen(QWidget):
         nav_lay = QHBoxLayout(nav)
         nav_lay.setContentsMargins(20, 0, 20, 0)
         nav_lay.setSpacing(12)
-
-        back_btn = PillButton("← HOME", color=BG_ELEVATED,
-                              hover_color=BG_FLOAT, text_color=TEXT_SEC)
-        back_btn.setFixedWidth(100)
-        back_btn.clicked.connect(self._on_back)
-        nav_lay.addWidget(back_btn)
 
         title_lbl = QLabel("Live Detection")
         title_lbl.setStyleSheet(
@@ -494,6 +496,10 @@ class PredictionScreen(QWidget):
         self._cooldown           = 0
         self._current_prediction = None
         self._seq_collector.clear()
+        try:
+            self._smoother.reset()
+        except Exception:
+            pass
         if self._speaker:
             try:
                 self._speaker.reset()
@@ -569,7 +575,15 @@ class PredictionScreen(QWidget):
                 features = self._spatial_extractor.extract_from_holistic(
                     hand_lms_list, pose_lms, face_lms)
 
-            sign_name, confidence = self.model.predict(features)
+            raw_sign, raw_conf = self.model.predict(features)
+
+            # Feed raw prediction into the smoothing window. The smoother
+            # returns a confidence-weighted majority vote over the last
+            # _smoothing_window frames; setting window=1 collapses to a no-op.
+            self._smoother.update(raw_sign, raw_conf or 0.0)
+            sm_sign, sm_conf = self._smoother.best()
+            sign_name = sm_sign if sm_sign else raw_sign
+            confidence = sm_conf if sm_sign else (raw_conf or 0.0)
 
             # Debug spatial overlay (lines from nose to wrists, zone colours,
             # contact lines from fingertips to face anchors)
@@ -580,7 +594,7 @@ class PredictionScreen(QWidget):
 
             if sign_name and confidence >= 0.80:
                 self._show_prediction(sign_name, confidence, tier="high")
-            elif sign_name and confidence >= CONFIDENCE_THRESHOLD:
+            elif sign_name and confidence >= self._confidence_threshold:
                 self._show_prediction(sign_name, confidence, tier="med")
             else:
                 self._show_low_confidence(confidence if confidence else 0.0)
@@ -653,7 +667,9 @@ class PredictionScreen(QWidget):
             f"QProgressBar::chunk {{ background: {color}; border-radius: 0; }}")
         self._update_status(status, color)
         self._current_prediction = sign_name
-        if tier == "high" and self._speaker:
+        # Gate TTS on confidence threshold so low-confidence flicker
+        # doesn't trigger noisy speech. _speaker.say() already dedupes.
+        if self._speaker and confidence >= self._confidence_threshold:
             self._speaker.say(display)
         self._check_auto_add(sign_name)
 
@@ -792,6 +808,7 @@ class PredictionScreen(QWidget):
         self._update_hold_progress(ratio, sign_name)
         if self._stable_count >= AUTO_ADD_FRAMES:
             if self._sentence_buffer.add_word(sign_name):
+                self._maybe_apply_phrase_match()
                 self._update_sentence_display()
             self._stable_count = 0
             self._stable_sign  = None
@@ -824,6 +841,7 @@ class PredictionScreen(QWidget):
             if self._sentence_buffer.add_word(self._current_prediction):
                 self._stable_count = 0
                 self._cooldown     = COOLDOWN_FRAMES
+                self._maybe_apply_phrase_match()
                 self._update_sentence_display()
 
     def _undo_word(self):
@@ -891,6 +909,74 @@ class PredictionScreen(QWidget):
         else:
             self._model_bar_lbl.setText("No model — train a sign first")
             self._model_info_lbl.setText("")
+
+    # ── Phrase matching ───────────────────────────────────────────────────────
+    def _maybe_apply_phrase_match(self):
+        """Check the buffer tail against phrases.json; collapse a match.
+
+        When a phrase like ['NICE','TO','MEET','YOU'] matches the tail, the
+        matched words are removed from the buffer and a single output token
+        is added in their place. The full phrase is also spoken as one
+        utterance via TTSSpeaker.speak_sentence().
+        """
+        if self._phrase_matcher is None:
+            return
+        words = self._sentence_buffer.get_words()
+        try:
+            result = self._phrase_matcher.match_tail(words)
+        except Exception as exc:
+            print(f"[PredictionScreen] phrase match failed: {exc}")
+            return
+        if not result:
+            return
+        matched_count, output = result
+        if matched_count <= 0 or not output:
+            return
+        for _ in range(matched_count):
+            self._sentence_buffer.undo()
+        self._sentence_buffer.add_word(output)
+        if self._speaker:
+            try:
+                self._speaker.speak_sentence(output)
+            except Exception:
+                pass
+
+    # ── Settings + dependency injection (called by MainWindow) ───────────────
+    def apply_settings(self, settings: dict) -> None:
+        """Apply a fresh settings dict (live updates from SettingsDialog)."""
+        self._confidence_threshold = float(
+            settings.get("confidence_threshold", 0.6))
+        new_window = max(1, int(settings.get("smoothing_window", 5)))
+        if new_window != self._smoothing_window:
+            self._smoothing_window = new_window
+            self._smoother = TemporalSmoother(
+                window=self._smoothing_window, min_vote_share=0.55,
+            )
+        if self._speaker:
+            try:
+                self._speaker.set_enabled(bool(settings.get("tts_enabled", True)))
+                self._speaker.set_voice(settings.get("tts_voice", "") or "")
+            except Exception as exc:
+                print(f"[PredictionScreen] TTS settings update failed: {exc}")
+
+    def set_phrase_matcher(self, matcher) -> None:
+        """Inject the PhraseMatcher used for tail matching."""
+        self._phrase_matcher = matcher
+
+    def set_camera(self, camera) -> None:
+        """Replace the camera handle and rebuild the worker on next activate."""
+        self._stop_camera()
+        self._camera = camera
+
+    def set_holistic(self, holistic) -> None:
+        """Replace the holistic detector and rebuild the worker on next activate."""
+        self._stop_camera()
+        self._holistic = holistic
+
+    def restart_camera(self) -> None:
+        """Stop and restart the camera worker (used after camera index change)."""
+        self._stop_camera()
+        self._start_camera()
 
     # ── TTS toggle ────────────────────────────────────────────────────────────
     def _toggle_mute(self):

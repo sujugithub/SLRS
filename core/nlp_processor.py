@@ -122,7 +122,7 @@ class RuleBasedNLP:
         if not words:
             return ""
 
-        tokens = [w.strip().upper() for w in words if w.strip()]
+        tokens = [w.strip().replace("_", " ").upper() for w in words if w.strip()]
         if not tokens:
             return ""
 

@@ -111,6 +111,11 @@ DEFAULT_MODEL_FILE  = os.path.join(_models_base, "sign_language_model.pkl")
 LSTM_MODEL_FILE     = os.path.join(_models_base, "lstm_sign_model.keras")
 LSTM_LABELS_FILE    = os.path.join(_models_base, "lstm_sign_model.keras.labels.json")
 
+# ── User-editable config files (settings, phrases, training metadata) ────────
+SETTINGS_FILE       = os.path.join(_data_base, "settings.json")
+PHRASES_FILE        = os.path.join(_data_base, "phrases.json")
+TRAINING_META_FILE  = os.path.join(_data_base, "training_meta.json")
+
 # ── Camera settings ────────────────────────────────────────────────────────────
 CAMERA_INDEX = 2
 CAMERA_WIDTH = 640

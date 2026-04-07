@@ -396,8 +396,14 @@ class TrainingScreen(QWidget):
         self._current_holistic_feats = holistic_feats
         self._latest_frame = annotated_frame
 
-        # Draw contact mode reminder overlay before displaying
+        # Draw debug overlay (face-to-hand distances) + contact mode reminder
         display_frame = annotated_frame.copy()
+        if hand_lms_list and pose_lms is not None:
+            features = self._spatial_extractor.extract_from_holistic(
+                hand_lms_list, pose_lms, face_lms)
+            self._spatial_extractor.draw_debug(
+                display_frame, features, pose_lms,
+                face_lms=face_lms, hand_lms_list=hand_lms_list)
         if self._contact_mode:
             self._draw_contact_mode_overlay(display_frame)
         self._cam_widget.set_frame(cv2_to_qpixmap(display_frame))

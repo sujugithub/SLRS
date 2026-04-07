@@ -15,7 +15,7 @@ import numpy as np
 import joblib
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 
 # Allow imports from project root when running this file directly
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -141,7 +141,19 @@ class SignModel:
                 random_state=RANDOM_STATE,
             )
             self.model.fit(self.X, self.y)
-            return {"accuracy": 1.0, "num_samples": len(self.X)}
+            # Per-sign breakdown is not meaningful without a held-out split,
+            # but we still report support so the View dialog can show counts.
+            per_sign = {}
+            for i, label in enumerate(self.labels):
+                per_sign[label] = {
+                    "accuracy": 1.0,
+                    "support":  int(np.sum(self.y == i)),
+                }
+            return {
+                "accuracy":    1.0,
+                "num_samples": len(self.X),
+                "per_sign":    per_sign,
+            }
 
         X_train, X_test, y_train, y_test = train_test_split(
             self.X, self.y,
@@ -159,7 +171,71 @@ class SignModel:
         y_pred = self.model.predict(X_test)
         accuracy = accuracy_score(y_test, y_pred)
 
-        return {"accuracy": accuracy, "num_samples": len(self.X)}
+        # Per-sign breakdown — recall is the natural per-class accuracy
+        # (fraction of held-out samples for that class predicted correctly).
+        labels_arr = list(range(len(self.labels)))
+        _, recall, _, support = precision_recall_fscore_support(
+            y_test, y_pred,
+            labels=labels_arr,
+            zero_division=0,
+        )
+        per_sign = {
+            self.labels[i]: {
+                "accuracy": float(recall[i]),
+                "support":  int(support[i]),
+            }
+            for i in range(len(self.labels))
+        }
+
+        return {
+            "accuracy":    accuracy,
+            "num_samples": len(self.X),
+            "per_sign":    per_sign,
+        }
+
+    # ---------------------------------------------------------- mutations
+    def evict_sign(self, sign_name: str) -> None:
+        """Remove every training row for ``sign_name`` and drop its label.
+
+        Used by the View dialog's Delete action. The caller must call
+        ``train()`` afterwards to refit the model on the remaining data.
+        """
+        if sign_name not in self._label_map:
+            return
+
+        old_idx = self._label_map[sign_name]
+        keep = self.y != old_idx
+        self.X = self.X[keep]
+        self.y = self.y[keep]
+
+        # Rebuild label list and map without the evicted entry
+        new_labels = [l for l in self.labels if l != sign_name]
+        # Build (old_idx -> new_idx) remap so the y array stays correct
+        old_to_new: dict[int, int] = {}
+        for new_i, label in enumerate(new_labels):
+            old_to_new[self._label_map[label]] = new_i
+
+        if self.y.size > 0:
+            self.y = np.array(
+                [old_to_new[int(v)] for v in self.y],
+                dtype=self.y.dtype,
+            )
+
+        self.labels = new_labels
+        self._label_map = {l: i for i, l in enumerate(new_labels)}
+
+        # If there's nothing left, drop the model so .predict() won't fire.
+        if not self.labels:
+            self.model = None
+
+    def reset_dataset(self) -> None:
+        """Wipe the in-memory training pool. The next ``train()`` call
+        starts from scratch — used by RetrainWorker before reloading from disk."""
+        feat_w = self.X.shape[1] if self.X.size else FEATURE_LENGTH
+        self.X = np.empty((0, feat_w), dtype=np.float64)
+        self.y = np.empty(0, dtype=int)
+        self.labels = []
+        self._label_map = {}
 
     # ----------------------------------------------------------- inference
     @staticmethod

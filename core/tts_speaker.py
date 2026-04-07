@@ -62,6 +62,7 @@ class TTSSpeaker:
         self._counter: int            = 0     # monotonic sequence for tie-break
         self._use_macos: bool         = (platform.system() == "Darwin"
                                          and self._macos_say_available())
+        self._voice_override: str | None = None  # set via set_voice()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
@@ -104,6 +105,70 @@ class TTSSpeaker:
         if not enabled:
             self._last_sign = None
             self._flush_all()
+
+    def set_voice(self, voice_id: str) -> None:
+        """Override the engine's voice. Empty string = system default.
+
+        On macOS this becomes the ``--voice`` argument to ``say``.
+        On other platforms it becomes the ``voice`` property on pyttsx3.
+        Applied to subsequent utterances; the change is immediate.
+        """
+        self._voice_override = voice_id or None
+
+    def list_voices(self) -> list[tuple[str, str]]:
+        """Return [(id, label), ...] for the Settings voice dropdown.
+
+        First entry is always ``("", "System default")``. Subsequent entries
+        are the voices reported by the platform's TTS engine.
+        """
+        default = ("", "System default")
+        if self._use_macos:
+            try:
+                result = subprocess.run(
+                    ["say", "-v", "?"],
+                    capture_output=True, text=True, timeout=4,
+                )
+                if result.returncode != 0:
+                    return [default]
+                voices: list[tuple[str, str]] = [default]
+                for line in result.stdout.splitlines():
+                    line = line.rstrip()
+                    if not line:
+                        continue
+                    # Lines look like:  "Samantha            en_US    # ..."
+                    # The voice name is everything before the locale column.
+                    parts = line.split()
+                    if len(parts) < 2:
+                        continue
+                    # Find the locale token (xx_XX) — name is everything before it
+                    locale_idx = None
+                    for i, p in enumerate(parts):
+                        if (len(p) == 5 and p[2] == "_"
+                                and p[:2].isalpha() and p[3:].isalpha()):
+                            locale_idx = i
+                            break
+                    if locale_idx is None or locale_idx == 0:
+                        name = parts[0]
+                        locale = ""
+                    else:
+                        name = " ".join(parts[:locale_idx])
+                        locale = parts[locale_idx]
+                    label = f"{name}  ({locale})" if locale else name
+                    voices.append((name, label))
+                return voices
+            except Exception:
+                return [default]
+
+        # Non-macOS: ask pyttsx3
+        try:
+            import pyttsx3
+            engine = pyttsx3.init()
+            voices = [default]
+            for v in engine.getProperty("voices"):
+                voices.append((v.id, v.name))
+            return voices
+        except Exception:
+            return [default]
 
     def stop(self) -> None:
         """Signal the background thread to exit cleanly."""
@@ -183,8 +248,9 @@ class TTSSpeaker:
         """Dispatch to macOS `say` or pyttsx3."""
         if self._use_macos:
             rate = self._RATE_SLOW if sentence else self._RATE_FAST
+            voice = self._voice_override or self._MACOS_VOICE
             subprocess.run(
-                ["say", "--voice", self._MACOS_VOICE,
+                ["say", "--voice", voice,
                  "--rate", str(rate), text],
                 capture_output=True,
                 timeout=30,
@@ -192,5 +258,10 @@ class TTSSpeaker:
         elif engine is not None:
             rate = self._RATE_SLOW if sentence else self._RATE_FAST
             engine.setProperty("rate", rate)
+            if self._voice_override:
+                try:
+                    engine.setProperty("voice", self._voice_override)
+                except Exception:
+                    pass
             engine.say(text)
             engine.runAndWait()

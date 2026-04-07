@@ -1,12 +1,17 @@
 
 """
 Main entry — PyQt6 version.
-QMainWindow + QStackedWidget, QThread workers for training.
+
+Launches directly into PredictionScreen. The four configuration / training
+flows (Train, View, Retrain, Settings) are reachable only via a discreet ☰
+hamburger menu in the top-right of the main window.
 """
 from __future__ import annotations
 
 import os
+import shutil
 import sys
+from datetime import datetime
 
 # ── Ensure Qt can locate the platform plugins (cocoa on macOS) when running
 #    as a plain Python script rather than a bundled application.
@@ -37,10 +42,11 @@ _set_qt_plugin_path()
 
 import numpy as np
 
-from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QThread, pyqtSignal
+from PyQt6.QtCore import QPoint, Qt, QThread, pyqtSignal
+from PyQt6.QtGui import QCursor
 from PyQt6.QtWidgets import (
-    QApplication, QGraphicsOpacityEffect, QHBoxLayout, QLabel,
-    QMainWindow, QMessageBox, QStackedWidget, QVBoxLayout, QWidget,
+    QApplication, QHBoxLayout, QLabel, QMainWindow, QMessageBox,
+    QPushButton, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from config import (
@@ -48,6 +54,7 @@ from config import (
     CUSTOM_DATA_DIR, SEQUENCE_DATA_DIR, SEQ_LENGTH,
     LSTM_MODEL_FILE, LSTM_LABELS_FILE,
 )
+from core import settings_store, phrase_store, training_meta
 from core.camera_handler import CameraHandler
 from core.hand_detector import HandDetector
 from core.pose_detector import PoseDetector
@@ -60,14 +67,19 @@ from gui.design import (
     SUCCESS, TEXT_TITLE, TEXT_SEC,
     GLOBAL_QSS, PulsingDot,
 )
-from gui.home_screen import HomeScreen
-from gui.training_screen import TrainingScreen
+from gui.menu_overlay import HamburgerMenu
 from gui.prediction_screen import PredictionScreen
+from gui.train_dialog import TrainDialog
+from gui.view_dialog import ViewDialog
+from gui.retrain_dialog import RetrainDialog
+from gui.settings_dialog import SettingsDialog
 
 
 # ── Background workers ─────────────────────────────────────────────────────────
 
 class RFTrainWorker(QThread):
+    """Saves freshly captured features and retrains the RF model."""
+
     finished = pyqtSignal(dict)
     error    = pyqtSignal(str)
 
@@ -89,9 +101,9 @@ class RFTrainWorker(QThread):
                     if existing.shape[1] == features_array.shape[1]:
                         features_array = np.vstack([existing, features_array])
                     else:
-                        # Old data has a different feature width (e.g. 63 legacy
-                        # vs 52 spatial). Discard the stale file so the model
-                        # retrains cleanly on the new format.
+                        # Old data has a different feature width — discard the
+                        # stale file so the model retrains cleanly on the new
+                        # format.
                         print(
                             f"[RFTrainWorker] Feature width changed "
                             f"({existing.shape[1]} → {features_array.shape[1]}) "
@@ -113,52 +125,30 @@ class RFTrainWorker(QThread):
             self.error.emit(str(exc))
 
 
-class LSTMTrainWorker(QThread):
+class RetrainWorker(QThread):
+    """Reloads every sign from disk and retrains the RF model from scratch."""
+
     finished = pyqtSignal(dict)
     error    = pyqtSignal(str)
 
-    def __init__(self, lstm_model, sign_name: str, sequences_list: list,
-                 parent=None):
+    def __init__(self, model, parent=None):
         super().__init__(parent)
-        self._lstm_model    = lstm_model
-        self._sign_name     = sign_name
-        self._sequences_list = sequences_list
+        self._model = model
 
     def run(self):
         try:
-            sign_seq_dir = os.path.join(SEQUENCE_DATA_DIR, self._sign_name)
-            os.makedirs(sign_seq_dir, exist_ok=True)
-            new_seqs = np.array(self._sequences_list, dtype=np.float32)
-            seq_path = os.path.join(sign_seq_dir, "sequences.npy")
-            if os.path.isfile(seq_path):
-                try:
-                    existing = np.load(seq_path)
-                    new_seqs = np.concatenate([existing, new_seqs], axis=0)
-                except Exception:
-                    pass
-            np.save(seq_path, new_seqs)
-
-            all_sequences: dict = {}
-            if os.path.isdir(SEQUENCE_DATA_DIR):
-                for sname in os.listdir(SEQUENCE_DATA_DIR):
-                    sdir  = os.path.join(SEQUENCE_DATA_DIR, sname)
-                    spath = os.path.join(sdir, "sequences.npy")
-                    if os.path.isfile(spath):
-                        try:
-                            all_sequences[sname] = np.load(spath)
-                        except Exception:
-                            pass
-
-            if not all_sequences:
-                raise ValueError("No sequence data found to train on.")
-
-            result = self._lstm_model.train(all_sequences)
-            self._lstm_model.save(LSTM_MODEL_FILE, LSTM_LABELS_FILE)
-            self.finished.emit({
-                "sign_name":     self._sign_name,
-                "accuracy":      result.get("accuracy", 0),
-                "num_sequences": result.get("num_sequences", 0),
-            })
+            self._model.reset_dataset()
+            self._model._load_from_dir(CUSTOM_DATA_DIR)
+            result = self._model.train() or {}
+            self._model.save_model()
+            meta = {
+                "trained_at":       datetime.now().isoformat(timespec="seconds"),
+                "overall_accuracy": float(result.get("accuracy", 0.0)),
+                "num_samples":      int(result.get("num_samples", 0)),
+                "per_sign":         result.get("per_sign", {}),
+            }
+            training_meta.save_meta(meta)
+            self.finished.emit(meta)
         except Exception as exc:
             self.error.emit(str(exc))
 
@@ -186,7 +176,8 @@ class MainWindow(QMainWindow):
         top_bar.setFixedHeight(40)
         top_bar.setStyleSheet(
             f"background-color: {BG_BASE};"
-            f" border-bottom: 1px solid {HAIR};")
+            f" border-bottom: 1px solid {HAIR};"
+        )
         tb_lay = QHBoxLayout(top_bar)
         tb_lay.setContentsMargins(20, 0, 20, 0)
         tb_lay.setSpacing(0)
@@ -195,7 +186,8 @@ class MainWindow(QMainWindow):
         brand.setStyleSheet(
             f"color: {TEXT_TITLE}; font-size: 13px; font-weight: 600;"
             f" font-family: Georgia, 'Times New Roman', serif;"
-            f" background: transparent; border: none; letter-spacing: 1px;")
+            f" background: transparent; border: none; letter-spacing: 1px;"
+        )
         tb_lay.addWidget(brand)
         tb_lay.addStretch(1)
 
@@ -207,8 +199,22 @@ class MainWindow(QMainWindow):
         mediapipe_lbl.setStyleSheet(
             f"color: {TEXT_SEC}; font-size: 10px;"
             f" font-family: 'Courier New', monospace; letter-spacing: 1px;"
-            f" background: transparent; border: none;")
+            f" background: transparent; border: none;"
+        )
         tb_lay.addWidget(mediapipe_lbl)
+        tb_lay.addSpacing(12)
+
+        # ☰ hamburger button — the only navigation surface
+        self._menu_btn = QPushButton("\u2630")
+        self._menu_btn.setFixedSize(28, 28)
+        self._menu_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self._menu_btn.setStyleSheet(
+            f"QPushButton {{ background: transparent; color: {TEXT_SEC};"
+            f" border: none; font-size: 16px; }}"
+            f"QPushButton:hover {{ color: {TEXT_TITLE}; }}"
+        )
+        self._menu_btn.clicked.connect(self._open_menu)
+        tb_lay.addWidget(self._menu_btn)
 
         central_lay.addWidget(top_bar)
 
@@ -216,45 +222,40 @@ class MainWindow(QMainWindow):
         self._stack = QStackedWidget()
         central_lay.addWidget(self._stack, 1)
 
-        # Shared resources
-        self.camera       = CameraHandler()
-        self.detector     = HandDetector()
-        self.pose_detector = PoseDetector()
-        self.holistic     = HolisticDetector()
-        self.model        = SignModel()
-        self.lstm_model   = LSTMSignModel(seq_len=SEQ_LENGTH)
-        self.speaker      = TTSSpeaker()
-
-        # Loading splash
-        splash = QLabel("◆  Initializing SignAI…")
+        # ── Splash while we initialise heavy resources ─────────────────────
+        splash = QLabel("\u25c6  Initializing SignBridge…")
         splash.setStyleSheet(
             f"font-size: 20px; font-weight: 700; color: {ACCENT};"
-            f" background-color: {BG_DEEP};")
+            f" background-color: {BG_DEEP};"
+        )
         splash.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._stack.addWidget(splash)
         self._stack.setCurrentWidget(splash)
         QApplication.processEvents()
 
+        # ── Settings + phrases (loaded before any camera/holistic init) ────
+        self._settings = settings_store.load_settings()
+        self._phrase_matcher = phrase_store.PhraseMatcher(
+            phrase_store.load_phrases())
+
+        # Shared resources — built using settings values so the user's
+        # camera index / mediapipe complexity choices apply on first launch.
+        self.camera = CameraHandler(camera_index=self._settings["camera_index"])
+        self.detector = HandDetector()
+        self.pose_detector = PoseDetector()
+        self.holistic = HolisticDetector(
+            model_complexity=self._settings["mediapipe_complexity"])
+        self.model = SignModel()
+        self.lstm_model = LSTMSignModel(seq_len=SEQ_LENGTH)
+        self.speaker = TTSSpeaker()
+
         self.model.load_pretrained()
         self.lstm_model.load(LSTM_MODEL_FILE, LSTM_LABELS_FILE)
 
-        # Build screens
-        self.home_screen = HomeScreen(
-            on_train_click=self.show_training,
-            on_predict_click=self.show_prediction,
-        )
-        self.training_screen = TrainingScreen(
-            on_back=self.show_home,
-            on_save=self._on_training_save,
-            on_save_sequences=self._on_sequences_save,
-            camera=self.camera,
-            detector=self.detector,
-            pose_detector=self.pose_detector,
-            holistic=self.holistic,
-        )
+        # ── Build screens ──────────────────────────────────────────────────
         self.prediction_screen = PredictionScreen(
             model=self.model,
-            on_back=self.show_home,
+            on_back=None,                 # back button removed; menu replaces it
             camera=self.camera,
             detector=self.detector,
             pose_detector=self.pose_detector,
@@ -262,122 +263,213 @@ class MainWindow(QMainWindow):
             holistic=self.holistic,
             lstm_model=self.lstm_model,
         )
+        self.prediction_screen.apply_settings(self._settings)
+        self.prediction_screen.set_phrase_matcher(self._phrase_matcher)
 
-        self._stack.addWidget(self.home_screen)
-        self._stack.addWidget(self.training_screen)
+        self.train_dialog = TrainDialog(
+            camera=self.camera,
+            holistic=self.holistic,
+        )
+        self.train_dialog.save_requested.connect(self._on_train_save)
+        self.train_dialog.back_requested.connect(self._show_prediction_default)
+
+        self.view_dialog = ViewDialog()
+        self.view_dialog.add_samples_requested.connect(self._on_view_add_samples)
+        self.view_dialog.delete_requested.connect(self._on_view_delete)
+        self.view_dialog.back_requested.connect(self._show_prediction_default)
+
+        self.retrain_dialog = RetrainDialog()
+        self.retrain_dialog.retrain_requested.connect(self._on_retrain_clicked)
+        self.retrain_dialog.back_requested.connect(self._show_prediction_default)
+        # Pre-populate the results panel from any prior retrain
+        self.retrain_dialog.populate_from_meta(training_meta.load_meta() or {})
+
+        self.settings_dialog = SettingsDialog()
+        self.settings_dialog.settings_changed.connect(self._on_settings_saved)
+        self.settings_dialog.back_requested.connect(self._show_prediction_default)
+
         self._stack.addWidget(self.prediction_screen)
+        self._stack.addWidget(self.train_dialog)
+        self._stack.addWidget(self.view_dialog)
+        self._stack.addWidget(self.retrain_dialog)
+        self._stack.addWidget(self.settings_dialog)
 
-        # Remove splash, go to home
+        # ── Hamburger popup ────────────────────────────────────────────────
+        self._menu = HamburgerMenu(self)
+        self._menu.item_selected.connect(self._on_menu_selected)
+
+        # Remove splash, switch to prediction screen
         self._stack.removeWidget(splash)
         splash.deleteLater()
 
         self._current_screen = None
-        self._rf_worker   = None
-        self._lstm_worker = None
+        self._rf_worker      = None
+        self._retrain_worker = None
+        self._pending_view_refresh = False
 
-        self._switch_to(self.home_screen, animate=False)
-        self.home_screen.activate()
-
-    # ── Screen switching ───────────────────────────────────────────────────────
-    def _switch_to(self, widget: QWidget, animate: bool = True):
-        if self._current_screen and self._current_screen is not widget:
-            self._current_screen.deactivate()
-
-        self._stack.setCurrentWidget(widget)
-        self._current_screen = widget
-
-        if animate:
-            eff = QGraphicsOpacityEffect(widget)
-            widget.setGraphicsEffect(eff)
-            anim = QPropertyAnimation(eff, b"opacity", widget)
-            anim.setDuration(220)
-            anim.setStartValue(0.0)
-            anim.setEndValue(1.0)
-            anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-            anim.finished.connect(lambda: widget.setGraphicsEffect(None))
-            anim.start()
-
-    def show_home(self):
-        self._switch_to(self.home_screen)
-        self.home_screen.activate()
-
-    def show_training(self):
-        self._switch_to(self.training_screen)
-        self.training_screen.reset()
-        self.training_screen.activate()
-
-    def show_prediction(self):
         self._switch_to(self.prediction_screen)
         self.prediction_screen.activate()
 
-    # ── Training callbacks ─────────────────────────────────────────────────────
-    def _on_training_save(self, sign_name: str, features_list: list):
-        self.training_screen.show_training_overlay("Training model…")
-        self._rf_worker = RFTrainWorker(self.model, sign_name, features_list, self)
+    # ── Screen switching ───────────────────────────────────────────────────────
+    def _switch_to(self, widget: QWidget) -> None:
+        if self._current_screen and self._current_screen is not widget:
+            try:
+                self._current_screen.deactivate()
+            except Exception:
+                pass
+        self._stack.setCurrentWidget(widget)
+        self._current_screen = widget
+
+    def _show_prediction_default(self) -> None:
+        self._switch_to(self.prediction_screen)
+        self.prediction_screen.activate()
+        if self._pending_view_refresh:
+            self._pending_view_refresh = False
+
+    # ── Hamburger menu ─────────────────────────────────────────────────────────
+    def _open_menu(self) -> None:
+        pos = self._menu_btn.mapToGlobal(QPoint(0, self._menu_btn.height() + 4))
+        # Anchor by right edge so the popup doesn't extend off-screen.
+        pos.setX(pos.x() - self._menu.width() + self._menu_btn.width())
+        self._menu.show_at(pos)
+
+    def _on_menu_selected(self, key: str) -> None:
+        if key == "train":
+            self._show_train()
+        elif key == "view":
+            self._show_view()
+        elif key == "retrain":
+            self._show_retrain()
+        elif key == "settings":
+            self._show_settings()
+
+    # ── Page openers ───────────────────────────────────────────────────────────
+    def _show_train(self, prefill: str | None = None) -> None:
+        self._switch_to(self.train_dialog)
+        self.train_dialog.activate(prefill=prefill)
+
+    def _show_view(self) -> None:
+        self._switch_to(self.view_dialog)
+        self.view_dialog.refresh()
+
+    def _show_retrain(self) -> None:
+        self._switch_to(self.retrain_dialog)
+
+    def _show_settings(self) -> None:
+        self._switch_to(self.settings_dialog)
+        self.settings_dialog.load_into_ui(self._settings)
+
+    # ── Train flow ─────────────────────────────────────────────────────────────
+    def _on_train_save(self, sign_name: str, features_list: list) -> None:
+        self._rf_worker = RFTrainWorker(
+            self.model, sign_name, features_list, self)
         self._rf_worker.finished.connect(self._rf_done)
         self._rf_worker.error.connect(self._rf_error)
         self._rf_worker.start()
 
-    def _rf_done(self, result: dict):
-        self.training_screen.hide_training_overlay()
-        sign  = result["sign_name"]
-        saved = result["num_saved"]
-        total = result["num_samples"]
-        acc   = result["accuracy"]
-        QMessageBox.information(
-            self, "Training Complete",
-            f"Sign \"{sign}\" saved!\n\n"
-            f"Samples saved: {saved}\n"
-            f"Total training data: {total}\n"
-            f"Model accuracy: {acc:.1%}")
-        self.show_home()
+    def _rf_done(self, result: dict) -> None:
+        try:
+            self.train_dialog.on_save_complete(result)
+        except Exception as exc:
+            print(f"[main] train_dialog.on_save_complete failed: {exc}")
 
-    def _rf_error(self, msg: str):
-        self.training_screen.hide_training_overlay()
-        QMessageBox.critical(self, "Save Error",
-                             f"Failed to save training data:\n{msg}")
-        self.show_home()
+    def _rf_error(self, msg: str) -> None:
+        try:
+            self.train_dialog.on_save_error(msg)
+        except Exception:
+            QMessageBox.critical(self, "Save Error",
+                                 f"Failed to save training data:\n{msg}")
 
-    def _on_sequences_save(self, sign_name: str, sequences_list: list):
-        self.training_screen.show_training_overlay("Training LSTM…")
-        self._lstm_worker = LSTMTrainWorker(
-            self.lstm_model, sign_name, sequences_list, self)
-        self._lstm_worker.finished.connect(self._lstm_done)
-        self._lstm_worker.error.connect(self._lstm_error)
-        self._lstm_worker.start()
+    # ── View flow ──────────────────────────────────────────────────────────────
+    def _on_view_add_samples(self, sign_name: str) -> None:
+        self._show_train(prefill=sign_name)
 
-    def _lstm_done(self, result: dict):
-        self.training_screen.hide_training_overlay()
-        sign = result["sign_name"]
-        n    = result["num_sequences"]
-        acc  = result["accuracy"]
-        QMessageBox.information(
-            self, "LSTM Training Complete",
-            f"Dynamic sign \"{sign}\" saved!\n\n"
-            f"Sequences used: {n}\n"
-            f"Model accuracy: {acc:.1%}")
-        self.show_home()
+    def _on_view_delete(self, sign_name: str) -> None:
+        sign_dir = os.path.join(CUSTOM_DATA_DIR, sign_name)
+        try:
+            shutil.rmtree(sign_dir, ignore_errors=True)
+        except Exception as exc:
+            QMessageBox.critical(self, "Delete Error",
+                                 f"Could not delete folder:\n{exc}")
+            return
+        try:
+            self.model.evict_sign(sign_name)
+            self.model.train()
+            self.model.save_model()
+        except Exception as exc:
+            print(f"[main] model evict/retrain after delete failed: {exc}")
+        self.view_dialog.refresh()
 
-    def _lstm_error(self, msg: str):
-        self.training_screen.hide_training_overlay()
-        QMessageBox.critical(self, "LSTM Save Error",
-                             f"Failed to save dynamic sign data:\n{msg}")
-        self.show_home()
+    # ── Retrain flow ───────────────────────────────────────────────────────────
+    def _on_retrain_clicked(self) -> None:
+        if self._retrain_worker is not None and self._retrain_worker.isRunning():
+            return
+        self.retrain_dialog.show_running()
+        self._retrain_worker = RetrainWorker(self.model, self)
+        self._retrain_worker.finished.connect(self._retrain_done)
+        self._retrain_worker.error.connect(self._retrain_error)
+        self._retrain_worker.start()
+
+    def _retrain_done(self, meta: dict) -> None:
+        self.retrain_dialog.show_results(meta)
+
+    def _retrain_error(self, msg: str) -> None:
+        self.retrain_dialog.show_error(msg)
+
+    # ── Settings flow ──────────────────────────────────────────────────────────
+    def _on_settings_saved(self, new_settings: dict) -> None:
+        old_camera_idx = self._settings.get("camera_index")
+        old_mp_complexity = self._settings.get("mediapipe_complexity")
+
+        self._settings.update(new_settings)
+        settings_store.save_settings(self._settings)
+
+        # Camera index changed → swap CameraHandler and rebuild the worker.
+        if new_settings.get("camera_index") != old_camera_idx:
+            try:
+                self.camera.stop()
+            except Exception:
+                pass
+            self.camera = CameraHandler(
+                camera_index=new_settings["camera_index"])
+            self.prediction_screen.set_camera(self.camera)
+            self.train_dialog._camera = self.camera   # train dialog reuses camera
+
+        # MediaPipe complexity changed → swap HolisticDetector.
+        if new_settings.get("mediapipe_complexity") != old_mp_complexity:
+            try:
+                self.holistic.close()
+            except Exception:
+                pass
+            self.holistic = HolisticDetector(
+                model_complexity=new_settings["mediapipe_complexity"])
+            self.prediction_screen.set_holistic(self.holistic)
+            self.train_dialog._holistic = self.holistic
+
+        # Apply threshold / smoothing / TTS / voice live.
+        self.prediction_screen.apply_settings(self._settings)
+
+        # Snap back to the prediction screen so the user sees the change.
+        self._show_prediction_default()
 
     # ── Close ──────────────────────────────────────────────────────────────────
     def closeEvent(self, event):
-        if self.training_screen.has_unsaved_data():
+        if self.train_dialog.has_unsaved_data():
             reply = QMessageBox.question(
                 self, "Unsaved Data",
-                "You have unsaved training captures.\nAre you sure you want to quit?",
+                "You have unsaved training captures.\n"
+                "Are you sure you want to quit?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No)
+                QMessageBox.StandardButton.No,
+            )
             if reply != QMessageBox.StandardButton.Yes:
                 event.ignore()
                 return
 
-        self.training_screen.cleanup()
-        self.prediction_screen.cleanup()
+        try: self.train_dialog.cleanup()
+        except Exception: pass
+        try: self.prediction_screen.cleanup()
+        except Exception: pass
 
         try: self.camera.stop()
         except Exception: pass

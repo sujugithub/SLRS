@@ -50,6 +50,37 @@ HAND_MODEL = os.path.join(MODELS_DIR, "hand_landmarker.task")
 POSE_MODEL = os.path.join(MODELS_DIR, "pose_landmarker_lite.task")
 FACE_MODEL = os.path.join(MODELS_DIR, "face_landmarker.task")
 
+
+# ─── Complexity → .task file resolution ──────────────────────────────────────
+# MediaPipe ships pose models in three sizes (lite/full/heavy). Only the lite
+# variant is bundled with this repo. The Settings dialog lets the user pick a
+# higher complexity, but if the corresponding .task file isn't on disk we
+# silently fall back to lite — so dropping in pose_landmarker_full.task or
+# pose_landmarker_heavy.task later "just works" without any code change.
+_POSE_FILES = {
+    0: "pose_landmarker_lite.task",
+    1: "pose_landmarker_full.task",
+    2: "pose_landmarker_heavy.task",
+}
+_HAND_FILES = {
+    0: "hand_landmarker.task",
+    1: "hand_landmarker_full.task",
+    2: "hand_landmarker_heavy.task",
+}
+
+
+def _resolve_task_file(complexity: int, files: dict, label: str) -> str:
+    requested = os.path.join(MODELS_DIR, files.get(complexity, files[0]))
+    if os.path.isfile(requested):
+        return requested
+    fallback = os.path.join(MODELS_DIR, files[0])
+    if complexity != 0:
+        print(
+            f"[HolisticDetector] {label} complexity={complexity} not bundled "
+            f"({os.path.basename(requested)}) — falling back to lite"
+        )
+    return fallback
+
 # ─── Feature dimensions ───────────────────────────────────────────────────────
 NUM_HAND_LMS         = 21
 NUM_COORDS           = 3
@@ -134,16 +165,25 @@ _FACE_MAX_IDX = max(max(p) for p in FACE_CONNECTIONS)
 class HolisticDetector:
     """Hand + pose + face detector with notebook-style visualization."""
 
-    def __init__(self):
+    def __init__(self, model_complexity: int = 0):
+        """
+        Args:
+            model_complexity: 0=Light, 1=Full, 2=Heavy. Falls back to Light
+                              if the requested .task file isn't on disk.
+        """
+        self._complexity = int(model_complexity)
+        hand_path = _resolve_task_file(self._complexity, _HAND_FILES, "hand")
+        pose_path = _resolve_task_file(self._complexity, _POSE_FILES, "pose")
+
         hand_opts = HandLandmarkerOptions(
-            base_options=BaseOptions(model_asset_path=HAND_MODEL),
+            base_options=BaseOptions(model_asset_path=hand_path),
             running_mode=RunningMode.IMAGE,
             num_hands=MAX_NUM_HANDS,
             min_hand_detection_confidence=MIN_DETECTION_CONFIDENCE,
             min_tracking_confidence=MIN_TRACKING_CONFIDENCE,
         )
         pose_opts = PoseLandmarkerOptions(
-            base_options=BaseOptions(model_asset_path=POSE_MODEL),
+            base_options=BaseOptions(model_asset_path=pose_path),
             running_mode=RunningMode.IMAGE,
             num_poses=1,
         )
