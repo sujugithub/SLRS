@@ -35,6 +35,7 @@ from gui.countdown_overlay import CountdownOverlay
 from gui.design import (
     ACCENT, BG_BASE, BG_BORDER, BG_DEEP, BG_FLOAT, BG_SURFACE, HAIR,
     SUCCESS, DANGER, TEXT_HINT, TEXT_PRIMARY, TEXT_SEC, TEXT_TITLE,
+    FONT_MONO, FONT_DISPLAY,
     CameraFrame, GlassCard, HSep, OutlineButton, PillButton, DangerButton,
     SectionLabel, cv2_to_qpixmap, lerp,
 )
@@ -116,26 +117,16 @@ class TrainDialog(QWidget):
             f" border-bottom: 1px solid {HAIR};"
         )
         nav_lay = QHBoxLayout(nav)
-        nav_lay.setContentsMargins(20, 0, 20, 0)
+        nav_lay.setContentsMargins(28, 0, 28, 0)
         nav_lay.setSpacing(12)
 
-        back_btn = OutlineButton("← BACK")
-        back_btn.setFixedWidth(100)
-        back_btn.clicked.connect(self._on_back)
-        nav_lay.addWidget(back_btn)
-
-        title_lbl = QLabel("Train")
-        title_lbl.setStyleSheet(
-            f"font-size: 13px; font-weight: 600; color: {TEXT_TITLE};"
-            f" font-family: Georgia, 'Times New Roman', serif;"
-            " background: transparent; border: none;"
-        )
-        nav_lay.addWidget(title_lbl, 1)
+        nav_lay.addStretch(1)
 
         self._step_lbl = QLabel("")
         self._step_lbl.setStyleSheet(
             f"font-size: 10px; color: {TEXT_HINT};"
-            f" font-family: 'Courier New', monospace; letter-spacing: 1px;"
+            f" font-family: '{FONT_MONO}', monospace;"
+            f" letter-spacing: 2px; font-weight: 700;"
             " background: transparent; border: none;"
         )
         nav_lay.addWidget(self._step_lbl, 0, Qt.AlignmentFlag.AlignRight)
@@ -170,7 +161,7 @@ class TrainDialog(QWidget):
         heading = QLabel("Record a new sign")
         heading.setStyleSheet(
             f"font-size: 22px; color: {TEXT_TITLE};"
-            f" font-family: Georgia, 'Times New Roman', serif;"
+            f" font-family: '{FONT_DISPLAY}', sans-serif;"
             " background: transparent; border: none;"
         )
         card_lay.addWidget(heading)
@@ -183,7 +174,7 @@ class TrainDialog(QWidget):
         sub.setWordWrap(True)
         sub.setStyleSheet(
             f"font-size: 11px; color: {TEXT_SEC};"
-            f" font-family: 'Courier New', monospace; line-height: 1.6;"
+            f" font-family: '{FONT_MONO}', monospace; line-height: 1.6;"
             " background: transparent; border: none;"
         )
         card_lay.addWidget(sub)
@@ -219,7 +210,7 @@ class TrainDialog(QWidget):
         self._word_header.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._word_header.setStyleSheet(
             f"font-size: 18px; color: {TEXT_TITLE};"
-            f" font-family: Georgia, 'Times New Roman', serif;"
+            f" font-family: '{FONT_DISPLAY}', sans-serif;"
             f" background: transparent; border: none; padding: 6px;"
         )
         page_lay.addWidget(self._word_header)
@@ -247,7 +238,7 @@ class TrainDialog(QWidget):
         thumb_label = QLabel("CAPTURED FRAMES")
         thumb_label.setStyleSheet(
             f"font-size: 9px; color: {TEXT_HINT};"
-            f" font-family: 'Courier New', monospace; letter-spacing: 2px;"
+            f" font-family: '{FONT_MONO}', monospace; letter-spacing: 2px;"
             " background: transparent; border: none;"
         )
         left_lay.addWidget(thumb_label)
@@ -287,7 +278,7 @@ class TrainDialog(QWidget):
         self._hand_status.setWordWrap(True)
         self._hand_status.setStyleSheet(
             f"font-size: 11px; color: {TEXT_SEC};"
-            f" font-family: 'Courier New', monospace;"
+            f" font-family: '{FONT_MONO}', monospace;"
             " background: transparent; border: none;"
         )
         right_lay.addWidget(self._hand_status)
@@ -300,7 +291,7 @@ class TrainDialog(QWidget):
         self._count_lbl = QLabel(f"0 / {AUTO_CAPTURE_TARGET}")
         self._count_lbl.setStyleSheet(
             f"font-size: 14px; font-weight: 600; color: {TEXT_PRIMARY};"
-            f" font-family: 'Courier New', monospace;"
+            f" font-family: '{FONT_MONO}', monospace;"
             " background: transparent; border: none;"
         )
         count_row.addWidget(self._count_lbl)
@@ -322,7 +313,7 @@ class TrainDialog(QWidget):
         self._auto_status.setWordWrap(True)
         self._auto_status.setStyleSheet(
             f"font-size: 10px; color: {TEXT_HINT};"
-            f" font-family: 'Courier New', monospace;"
+            f" font-family: '{FONT_MONO}', monospace;"
             " background: transparent; border: none;"
         )
         right_lay.addWidget(self._auto_status)
@@ -334,7 +325,7 @@ class TrainDialog(QWidget):
         self._confirm_lbl.setWordWrap(True)
         self._confirm_lbl.setStyleSheet(
             f"font-size: 11px; color: {SUCCESS};"
-            f" font-family: 'Courier New', monospace;"
+            f" font-family: '{FONT_MONO}', monospace;"
             " background: transparent; border: none;"
         )
         right_lay.addWidget(self._confirm_lbl)
@@ -420,7 +411,7 @@ class TrainDialog(QWidget):
         """Called by MainWindow if the RFTrainWorker raised an error."""
         self._confirm_lbl.setStyleSheet(
             f"font-size: 11px; color: {DANGER};"
-            f" font-family: 'Courier New', monospace;"
+            f" font-family: '{FONT_MONO}', monospace;"
             " background: transparent; border: none;"
         )
         self._confirm_lbl.setText(f"Error: {msg}")
@@ -461,7 +452,7 @@ class TrainDialog(QWidget):
         self._confirm_lbl.setText("")
         self._confirm_lbl.setStyleSheet(
             f"font-size: 11px; color: {SUCCESS};"
-            f" font-family: 'Courier New', monospace;"
+            f" font-family: '{FONT_MONO}', monospace;"
             " background: transparent; border: none;"
         )
 
@@ -593,7 +584,7 @@ class TrainDialog(QWidget):
             )
             self._auto_status.setStyleSheet(
                 f"font-size: 10px; color: {SUCCESS};"
-                f" font-family: 'Courier New', monospace;"
+                f" font-family: '{FONT_MONO}', monospace;"
                 " background: transparent; border: none;"
             )
             self._stop_camera()
@@ -618,7 +609,7 @@ class TrainDialog(QWidget):
             )
             self._auto_status.setStyleSheet(
                 f"font-size: 10px; color: {ACCENT};"
-                f" font-family: 'Courier New', monospace;"
+                f" font-family: '{FONT_MONO}', monospace;"
                 " background: transparent; border: none;"
             )
         else:
@@ -666,7 +657,7 @@ class TrainDialog(QWidget):
         self._hand_status.setText(text)
         self._hand_status.setStyleSheet(
             f"font-size: 11px; color: {color};"
-            f" font-family: 'Courier New', monospace;"
+            f" font-family: '{FONT_MONO}', monospace;"
             " background: transparent; border: none;"
         )
 

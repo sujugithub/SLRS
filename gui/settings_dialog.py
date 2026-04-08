@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
 from gui.design import (
     ACCENT, BG_BASE, BG_DEEP, BG_FLOAT, BG_SURFACE, HAIR,
     SUCCESS, TEXT_HINT, TEXT_PRIMARY, TEXT_SEC, TEXT_TITLE,
+    FONT_MONO, FONT_DISPLAY,
     GlassCard, HSep, PillButton, OutlineButton, SectionLabel,
 )
 
@@ -24,7 +25,7 @@ def _value_label(text: str = "") -> QLabel:
     lbl = QLabel(text)
     lbl.setStyleSheet(
         f"font-size: 12px; font-weight: 600; color: {TEXT_TITLE};"
-        f" font-family: 'Courier New', monospace;"
+        f" font-family: '{FONT_MONO}', monospace;"
         " background: transparent; border: none;"
     )
     return lbl
@@ -35,7 +36,7 @@ def _hint_label(text: str = "") -> QLabel:
     lbl.setWordWrap(True)
     lbl.setStyleSheet(
         f"font-size: 10px; color: {TEXT_HINT};"
-        f" font-family: 'Courier New', monospace;"
+        f" font-family: '{FONT_MONO}', monospace;"
         " background: transparent; border: none;"
     )
     return lbl
@@ -65,21 +66,9 @@ class SettingsDialog(QWidget):
             f" border-bottom: 1px solid {HAIR};"
         )
         nav_lay = QHBoxLayout(nav)
-        nav_lay.setContentsMargins(20, 0, 20, 0)
+        nav_lay.setContentsMargins(28, 0, 28, 0)
         nav_lay.setSpacing(12)
-
-        back_btn = OutlineButton("← BACK")
-        back_btn.setFixedWidth(100)
-        back_btn.clicked.connect(self.back_requested.emit)
-        nav_lay.addWidget(back_btn)
-
-        title_lbl = QLabel("Settings")
-        title_lbl.setStyleSheet(
-            f"font-size: 13px; font-weight: 600; color: {TEXT_TITLE};"
-            f" font-family: Georgia, 'Times New Roman', serif;"
-            " background: transparent; border: none;"
-        )
-        nav_lay.addWidget(title_lbl, 1)
+        nav_lay.addStretch(1)
         root.addWidget(nav)
 
         # Body container
@@ -207,7 +196,7 @@ class SettingsDialog(QWidget):
         return (
             f"QComboBox {{ background-color: {BG_FLOAT}; color: {TEXT_PRIMARY};"
             f" border: 1px solid {HAIR}; border-radius: 0; padding: 6px 10px;"
-            f" font-family: 'Courier New', monospace; font-size: 12px; }}"
+            f" font-family: '{FONT_MONO}', monospace; font-size: 12px; }}"
             f"QComboBox::drop-down {{ border: none; width: 22px; }}"
             f"QComboBox QAbstractItemView {{ background-color: {BG_FLOAT};"
             f" color: {TEXT_PRIMARY}; selection-background-color: {ACCENT};"

@@ -1,10 +1,10 @@
-
 """
-Main entry — PyQt6 version.
+Main entry — PyQt6 version, redesigned UI.
 
 Launches directly into PredictionScreen. The four configuration / training
-flows (Train, View, Retrain, Settings) are reachable only via a discreet ☰
-hamburger menu in the top-right of the main window.
+flows (Train, Library, Retrain, Settings) are reachable only via the
+hamburger menu in the top-right; clicking it opens a slide-in modal drawer
+that hosts the four sub-screens.
 """
 from __future__ import annotations
 
@@ -13,24 +13,15 @@ import shutil
 import sys
 from datetime import datetime
 
+
 # ── Ensure Qt can locate the platform plugins (cocoa on macOS) when running
 #    as a plain Python script rather than a bundled application.
 def _set_qt_plugin_path() -> None:
-    """Set QT_QPA_PLATFORM_PLUGIN_PATH to the PyQt6-bundled platforms directory.
-
-    On macOS, Qt's runtime plugin scanner requires QT_QPA_PLATFORM_PLUGIN_PATH
-    to be set explicitly when running from a venv or non-standard Python install
-    (e.g. uv-managed Python, pyenv, conda).  This must be done BEFORE any
-    PyQt6.QtWidgets import triggers QApplication initialisation.
-    """
     try:
         import PyQt6 as _pyqt6
         _qt_root = os.path.join(os.path.dirname(_pyqt6.__file__), "Qt6")
         _plugins  = os.path.join(_qt_root, "plugins")
         _platforms = os.path.join(_plugins, "platforms")
-
-        # Always set (not setdefault) so a stale env var from a prior run
-        # or from the shell cannot point Qt at the wrong directory.
         if os.path.isdir(_platforms):
             os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = _platforms
         if os.path.isdir(_plugins):
@@ -42,11 +33,11 @@ _set_qt_plugin_path()
 
 import numpy as np
 
-from PyQt6.QtCore import QPoint, Qt, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QCursor
 from PyQt6.QtWidgets import (
     QApplication, QHBoxLayout, QLabel, QMainWindow, QMessageBox,
-    QPushButton, QStackedWidget, QVBoxLayout, QWidget,
+    QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from config import (
@@ -63,11 +54,12 @@ from core.model_trainer import SignModel
 from core.lstm_trainer import LSTMSignModel
 from core.tts_speaker import TTSSpeaker
 from gui.design import (
-    ACCENT, BG_DEEP, BG_BASE, HAIR,
-    SUCCESS, TEXT_TITLE, TEXT_SEC,
-    GLOBAL_QSS, PulsingDot,
+    ACCENT, BG_DEEP, BG_BASE, BG_SURFACE, HAIR, HAIR_STRONG,
+    SUCCESS, TEXT_TITLE, TEXT_SEC, TEXT_HINT,
+    FONT_DISPLAY, FONT_MONO, IconButton, PulsingDot,
+    init_fonts, rebuild_global_qss,
 )
-from gui.menu_overlay import HamburgerMenu
+from gui.menu_overlay import MenuDrawer
 from gui.prediction_screen import PredictionScreen
 from gui.train_dialog import TrainDialog
 from gui.view_dialog import ViewDialog
@@ -75,7 +67,7 @@ from gui.retrain_dialog import RetrainDialog
 from gui.settings_dialog import SettingsDialog
 
 
-# ── Background workers ─────────────────────────────────────────────────────────
+# ── Background workers ───────────────────────────────────────────────────────
 
 class RFTrainWorker(QThread):
     """Saves freshly captured features and retrains the RF model."""
@@ -101,9 +93,6 @@ class RFTrainWorker(QThread):
                     if existing.shape[1] == features_array.shape[1]:
                         features_array = np.vstack([existing, features_array])
                     else:
-                        # Old data has a different feature width — discard the
-                        # stale file so the model retrains cleanly on the new
-                        # format.
                         print(
                             f"[RFTrainWorker] Feature width changed "
                             f"({existing.shape[1]} → {features_array.shape[1]}) "
@@ -153,17 +142,17 @@ class RetrainWorker(QThread):
             self.error.emit(str(exc))
 
 
-# ── Main window ────────────────────────────────────────────────────────────────
+# ── Main window ──────────────────────────────────────────────────────────────
 
 class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
         self.setWindowTitle(APP_TITLE)
-        self.resize(max(WINDOW_WIDTH, 1100), max(WINDOW_HEIGHT, 700))
-        self.setMinimumSize(1100, 700)
+        self.resize(max(WINDOW_WIDTH, 1280), max(WINDOW_HEIGHT, 800))
+        self.setMinimumSize(1180, 760)
 
-        # ── Central layout: top bar + stacked content ──────────────────────
+        # ── Central layout: top bar + content ──────────────────────────────
         central = QWidget()
         central.setStyleSheet(f"background-color: {BG_DEEP};")
         central_lay = QVBoxLayout(central)
@@ -171,61 +160,88 @@ class MainWindow(QMainWindow):
         central_lay.setSpacing(0)
         self.setCentralWidget(central)
 
-        # Slim 40px top bar
+        # Top bar
         top_bar = QWidget()
-        top_bar.setFixedHeight(40)
+        top_bar.setFixedHeight(56)
         top_bar.setStyleSheet(
             f"background-color: {BG_BASE};"
             f" border-bottom: 1px solid {HAIR};"
         )
         tb_lay = QHBoxLayout(top_bar)
-        tb_lay.setContentsMargins(20, 0, 20, 0)
+        tb_lay.setContentsMargins(28, 0, 18, 0)
         tb_lay.setSpacing(0)
 
-        brand = QLabel("SignBridge")
-        brand.setStyleSheet(
-            f"color: {TEXT_TITLE}; font-size: 13px; font-weight: 600;"
-            f" font-family: Georgia, 'Times New Roman', serif;"
-            f" background: transparent; border: none; letter-spacing: 1px;"
+        # Brand mark
+        mark = QLabel("◆")
+        mark.setStyleSheet(
+            f"color: {ACCENT}; font-size: 16px; font-weight: 700;"
+            f" background: transparent; border: none;"
         )
-        tb_lay.addWidget(brand)
+        tb_lay.addWidget(mark)
+        tb_lay.addSpacing(10)
+
+        brand_col = QVBoxLayout()
+        brand_col.setContentsMargins(0, 0, 0, 0)
+        brand_col.setSpacing(0)
+
+        brand_top = QLabel("SignBridge")
+        brand_top.setStyleSheet(
+            f"color: {TEXT_TITLE}; font-size: 15px; font-weight: 700;"
+            f" font-family: '{FONT_DISPLAY}', sans-serif;"
+            f" letter-spacing: -0.2px;"
+            f" background: transparent; border: none;"
+        )
+        brand_sub = QLabel("LIVE SIGN RECOGNITION")
+        brand_sub.setStyleSheet(
+            f"color: {TEXT_HINT}; font-size: 8px; font-weight: 700;"
+            f" font-family: '{FONT_MONO}', monospace; letter-spacing: 2.5px;"
+            f" background: transparent; border: none;"
+        )
+        brand_col.addWidget(brand_top)
+        brand_col.addWidget(brand_sub)
+        tb_lay.addLayout(brand_col)
+
         tb_lay.addStretch(1)
 
-        self._status_dot = PulsingDot(on_color=SUCCESS, off_color="#2a4a35", size=7)
+        # Right side: status pill + hamburger
+        self._status_dot = PulsingDot(
+            on_color=ACCENT, off_color="#0a3a35", size=8,
+        )
         tb_lay.addWidget(self._status_dot)
         tb_lay.addSpacing(8)
 
-        mediapipe_lbl = QLabel("MediaPipe Active")
+        mediapipe_lbl = QLabel("MEDIAPIPE ACTIVE")
         mediapipe_lbl.setStyleSheet(
-            f"color: {TEXT_SEC}; font-size: 10px;"
-            f" font-family: 'Courier New', monospace; letter-spacing: 1px;"
+            f"color: {TEXT_SEC}; font-size: 9px;"
+            f" font-family: '{FONT_MONO}', monospace; letter-spacing: 2px;"
+            f" font-weight: 700;"
             f" background: transparent; border: none;"
         )
         tb_lay.addWidget(mediapipe_lbl)
+        tb_lay.addSpacing(20)
+
+        # Vertical separator
+        sep = QWidget()
+        sep.setFixedSize(1, 24)
+        sep.setStyleSheet(f"background-color: {HAIR_STRONG}; border: none;")
+        tb_lay.addWidget(sep)
         tb_lay.addSpacing(12)
 
-        # ☰ hamburger button — the only navigation surface
-        self._menu_btn = QPushButton("\u2630")
-        self._menu_btn.setFixedSize(28, 28)
-        self._menu_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        self._menu_btn.setStyleSheet(
-            f"QPushButton {{ background: transparent; color: {TEXT_SEC};"
-            f" border: none; font-size: 16px; }}"
-            f"QPushButton:hover {{ color: {TEXT_TITLE}; }}"
-        )
+        # Hamburger
+        self._menu_btn = IconButton("☰", size=40)
         self._menu_btn.clicked.connect(self._open_menu)
         tb_lay.addWidget(self._menu_btn)
 
         central_lay.addWidget(top_bar)
 
-        # Stacked widget goes below the top bar
+        # ── Stacked widget for splash → prediction screen ──────────────────
         self._stack = QStackedWidget()
         central_lay.addWidget(self._stack, 1)
 
-        # ── Splash while we initialise heavy resources ─────────────────────
-        splash = QLabel("\u25c6  Initializing SignBridge…")
+        splash = QLabel("◆  INITIALIZING SIGNBRIDGE…")
         splash.setStyleSheet(
-            f"font-size: 20px; font-weight: 700; color: {ACCENT};"
+            f"font-size: 16px; font-weight: 700; color: {ACCENT};"
+            f" font-family: '{FONT_MONO}', monospace; letter-spacing: 3px;"
             f" background-color: {BG_DEEP};"
         )
         splash.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -233,13 +249,12 @@ class MainWindow(QMainWindow):
         self._stack.setCurrentWidget(splash)
         QApplication.processEvents()
 
-        # ── Settings + phrases (loaded before any camera/holistic init) ────
+        # ── Settings + phrases ─────────────────────────────────────────────
         self._settings = settings_store.load_settings()
         self._phrase_matcher = phrase_store.PhraseMatcher(
             phrase_store.load_phrases())
 
-        # Shared resources — built using settings values so the user's
-        # camera index / mediapipe complexity choices apply on first launch.
+        # Shared resources — built using settings values.
         self.camera = CameraHandler(camera_index=self._settings["camera_index"])
         self.detector = HandDetector()
         self.pose_detector = PoseDetector()
@@ -252,10 +267,10 @@ class MainWindow(QMainWindow):
         self.model.load_pretrained()
         self.lstm_model.load(LSTM_MODEL_FILE, LSTM_LABELS_FILE)
 
-        # ── Build screens ──────────────────────────────────────────────────
+        # ── Build prediction screen (always-on main view) ──────────────────
         self.prediction_screen = PredictionScreen(
             model=self.model,
-            on_back=None,                 # back button removed; menu replaces it
+            on_back=None,
             camera=self.camera,
             detector=self.detector,
             pose_detector=self.pose_detector,
@@ -265,101 +280,103 @@ class MainWindow(QMainWindow):
         )
         self.prediction_screen.apply_settings(self._settings)
         self.prediction_screen.set_phrase_matcher(self._phrase_matcher)
+        self._stack.addWidget(self.prediction_screen)
 
+        # ── Build sub-screens (hosted inside the drawer) ───────────────────
         self.train_dialog = TrainDialog(
             camera=self.camera,
             holistic=self.holistic,
         )
         self.train_dialog.save_requested.connect(self._on_train_save)
-        self.train_dialog.back_requested.connect(self._show_prediction_default)
+        self.train_dialog.back_requested.connect(self._close_drawer)
 
         self.view_dialog = ViewDialog()
         self.view_dialog.add_samples_requested.connect(self._on_view_add_samples)
         self.view_dialog.delete_requested.connect(self._on_view_delete)
-        self.view_dialog.back_requested.connect(self._show_prediction_default)
+        self.view_dialog.back_requested.connect(self._close_drawer)
 
         self.retrain_dialog = RetrainDialog()
         self.retrain_dialog.retrain_requested.connect(self._on_retrain_clicked)
-        self.retrain_dialog.back_requested.connect(self._show_prediction_default)
-        # Pre-populate the results panel from any prior retrain
+        self.retrain_dialog.back_requested.connect(self._close_drawer)
         self.retrain_dialog.populate_from_meta(training_meta.load_meta() or {})
 
         self.settings_dialog = SettingsDialog()
         self.settings_dialog.settings_changed.connect(self._on_settings_saved)
-        self.settings_dialog.back_requested.connect(self._show_prediction_default)
+        self.settings_dialog.back_requested.connect(self._close_drawer)
 
-        self._stack.addWidget(self.prediction_screen)
-        self._stack.addWidget(self.train_dialog)
-        self._stack.addWidget(self.view_dialog)
-        self._stack.addWidget(self.retrain_dialog)
-        self._stack.addWidget(self.settings_dialog)
+        # ── Build menu drawer (overlay child of MainWindow) ────────────────
+        self._menu = MenuDrawer(self)
+        self._menu.add_screen("train",    self.train_dialog)
+        self._menu.add_screen("view",     self.view_dialog)
+        self._menu.add_screen("retrain",  self.retrain_dialog)
+        self._menu.add_screen("settings", self.settings_dialog)
+        self._menu.item_selected.connect(self._on_menu_item)
+        self._menu.closed.connect(self._on_menu_closed)
 
-        # ── Hamburger popup ────────────────────────────────────────────────
-        self._menu = HamburgerMenu(self)
-        self._menu.item_selected.connect(self._on_menu_selected)
-
-        # Remove splash, switch to prediction screen
-        self._stack.removeWidget(splash)
-        splash.deleteLater()
-
-        self._current_screen = None
+        # State trackers
         self._rf_worker      = None
         self._retrain_worker = None
-        self._pending_view_refresh = False
+        self._current_drawer_key: str | None = None
 
-        self._switch_to(self.prediction_screen)
+        # Switch to prediction screen
+        self._stack.removeWidget(splash)
+        splash.deleteLater()
+        self._stack.setCurrentWidget(self.prediction_screen)
         self.prediction_screen.activate()
 
-    # ── Screen switching ───────────────────────────────────────────────────────
-    def _switch_to(self, widget: QWidget) -> None:
-        if self._current_screen and self._current_screen is not widget:
+    # ── Hamburger drawer plumbing ────────────────────────────────────────────
+    def _open_menu(self) -> None:
+        # Pause the prediction screen so it releases the camera before any
+        # sub-screen (TrainDialog) might claim it.
+        try:
+            self.prediction_screen.deactivate()
+        except Exception:
+            pass
+        self._menu.open_drawer(initial_key="train")
+
+    def _close_drawer(self) -> None:
+        self._menu.close_drawer()
+
+    def _on_menu_closed(self) -> None:
+        # Tear down the active sub-screen and resume prediction.
+        self._deactivate_current_sub()
+        self._current_drawer_key = None
+        try:
+            self.prediction_screen.activate()
+        except Exception:
+            pass
+
+    def _on_menu_item(self, key: str) -> None:
+        # Deactivate the previously visible sub-screen, activate the new one.
+        if self._current_drawer_key == key:
+            return
+        self._deactivate_current_sub()
+        self._current_drawer_key = key
+        self._activate_sub(key)
+
+    def _activate_sub(self, key: str) -> None:
+        if key == "train":
+            self.train_dialog.activate()
+        elif key == "view":
+            self.view_dialog.refresh()
+        elif key == "retrain":
             try:
-                self._current_screen.deactivate()
+                self.retrain_dialog.populate_from_meta(
+                    training_meta.load_meta() or {})
             except Exception:
                 pass
-        self._stack.setCurrentWidget(widget)
-        self._current_screen = widget
-
-    def _show_prediction_default(self) -> None:
-        self._switch_to(self.prediction_screen)
-        self.prediction_screen.activate()
-        if self._pending_view_refresh:
-            self._pending_view_refresh = False
-
-    # ── Hamburger menu ─────────────────────────────────────────────────────────
-    def _open_menu(self) -> None:
-        pos = self._menu_btn.mapToGlobal(QPoint(0, self._menu_btn.height() + 4))
-        # Anchor by right edge so the popup doesn't extend off-screen.
-        pos.setX(pos.x() - self._menu.width() + self._menu_btn.width())
-        self._menu.show_at(pos)
-
-    def _on_menu_selected(self, key: str) -> None:
-        if key == "train":
-            self._show_train()
-        elif key == "view":
-            self._show_view()
-        elif key == "retrain":
-            self._show_retrain()
         elif key == "settings":
-            self._show_settings()
+            self.settings_dialog.load_into_ui(self._settings)
 
-    # ── Page openers ───────────────────────────────────────────────────────────
-    def _show_train(self, prefill: str | None = None) -> None:
-        self._switch_to(self.train_dialog)
-        self.train_dialog.activate(prefill=prefill)
+    def _deactivate_current_sub(self) -> None:
+        key = self._current_drawer_key
+        if key == "train":
+            try:
+                self.train_dialog.deactivate()
+            except Exception:
+                pass
 
-    def _show_view(self) -> None:
-        self._switch_to(self.view_dialog)
-        self.view_dialog.refresh()
-
-    def _show_retrain(self) -> None:
-        self._switch_to(self.retrain_dialog)
-
-    def _show_settings(self) -> None:
-        self._switch_to(self.settings_dialog)
-        self.settings_dialog.load_into_ui(self._settings)
-
-    # ── Train flow ─────────────────────────────────────────────────────────────
+    # ── Train flow ───────────────────────────────────────────────────────────
     def _on_train_save(self, sign_name: str, features_list: list) -> None:
         self._rf_worker = RFTrainWorker(
             self.model, sign_name, features_list, self)
@@ -377,20 +394,24 @@ class MainWindow(QMainWindow):
         try:
             self.train_dialog.on_save_error(msg)
         except Exception:
-            QMessageBox.critical(self, "Save Error",
-                                 f"Failed to save training data:\n{msg}")
+            QMessageBox.critical(
+                self, "Save Error", f"Failed to save training data:\n{msg}")
 
-    # ── View flow ──────────────────────────────────────────────────────────────
+    # ── View flow ────────────────────────────────────────────────────────────
     def _on_view_add_samples(self, sign_name: str) -> None:
-        self._show_train(prefill=sign_name)
+        # Switch to the train sub-screen and prefill with the sign name.
+        self._deactivate_current_sub()
+        self._current_drawer_key = "train"
+        self._menu.select("train")
+        self.train_dialog.activate(prefill=sign_name)
 
     def _on_view_delete(self, sign_name: str) -> None:
         sign_dir = os.path.join(CUSTOM_DATA_DIR, sign_name)
         try:
             shutil.rmtree(sign_dir, ignore_errors=True)
         except Exception as exc:
-            QMessageBox.critical(self, "Delete Error",
-                                 f"Could not delete folder:\n{exc}")
+            QMessageBox.critical(
+                self, "Delete Error", f"Could not delete folder:\n{exc}")
             return
         try:
             self.model.evict_sign(sign_name)
@@ -400,7 +421,7 @@ class MainWindow(QMainWindow):
             print(f"[main] model evict/retrain after delete failed: {exc}")
         self.view_dialog.refresh()
 
-    # ── Retrain flow ───────────────────────────────────────────────────────────
+    # ── Retrain flow ─────────────────────────────────────────────────────────
     def _on_retrain_clicked(self) -> None:
         if self._retrain_worker is not None and self._retrain_worker.isRunning():
             return
@@ -416,7 +437,7 @@ class MainWindow(QMainWindow):
     def _retrain_error(self, msg: str) -> None:
         self.retrain_dialog.show_error(msg)
 
-    # ── Settings flow ──────────────────────────────────────────────────────────
+    # ── Settings flow ────────────────────────────────────────────────────────
     def _on_settings_saved(self, new_settings: dict) -> None:
         old_camera_idx = self._settings.get("camera_index")
         old_mp_complexity = self._settings.get("mediapipe_complexity")
@@ -424,7 +445,6 @@ class MainWindow(QMainWindow):
         self._settings.update(new_settings)
         settings_store.save_settings(self._settings)
 
-        # Camera index changed → swap CameraHandler and rebuild the worker.
         if new_settings.get("camera_index") != old_camera_idx:
             try:
                 self.camera.stop()
@@ -433,9 +453,8 @@ class MainWindow(QMainWindow):
             self.camera = CameraHandler(
                 camera_index=new_settings["camera_index"])
             self.prediction_screen.set_camera(self.camera)
-            self.train_dialog._camera = self.camera   # train dialog reuses camera
+            self.train_dialog._camera = self.camera
 
-        # MediaPipe complexity changed → swap HolisticDetector.
         if new_settings.get("mediapipe_complexity") != old_mp_complexity:
             try:
                 self.holistic.close()
@@ -446,13 +465,17 @@ class MainWindow(QMainWindow):
             self.prediction_screen.set_holistic(self.holistic)
             self.train_dialog._holistic = self.holistic
 
-        # Apply threshold / smoothing / TTS / voice live.
         self.prediction_screen.apply_settings(self._settings)
 
-        # Snap back to the prediction screen so the user sees the change.
-        self._show_prediction_default()
+        self._close_drawer()
 
-    # ── Close ──────────────────────────────────────────────────────────────────
+    # ── Resize → keep drawer geometry in sync ────────────────────────────────
+    def resizeEvent(self, event):
+        if self._menu is not None and self._menu.isVisible():
+            self._menu.setGeometry(self.centralWidget().rect())
+        super().resizeEvent(event)
+
+    # ── Close ────────────────────────────────────────────────────────────────
     def closeEvent(self, event):
         if self.train_dialog.has_unsaved_data():
             reply = QMessageBox.question(
@@ -485,11 +508,14 @@ class MainWindow(QMainWindow):
         event.accept()
 
 
-# ── Entry point ────────────────────────────────────────────────────────────────
+# ── Entry point ──────────────────────────────────────────────────────────────
 
 def main():
     app = QApplication.instance() or QApplication(sys.argv)
-    app.setStyleSheet(GLOBAL_QSS)
+    # Resolve fonts now that QApplication exists, then build the stylesheet.
+    init_fonts()
+    qss = rebuild_global_qss()
+    app.setStyleSheet(qss)
     win = MainWindow()
     win.show()
     sys.exit(app.exec())

@@ -12,7 +12,7 @@ from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QPainter
 from PyQt6.QtWidgets import QWidget
 
-from gui.design import TEXT_TITLE, ACCENT
+from gui.design import TEXT_TITLE, ACCENT, FONT_DISPLAY, FONT_MONO
 
 
 class CountdownOverlay(QWidget):
@@ -83,24 +83,44 @@ class CountdownOverlay(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # Semi-transparent dark backdrop
-        p.fillRect(self.rect(), QColor(10, 10, 9, 220))
+        # Semi-transparent very-dark backdrop
+        p.fillRect(self.rect(), QColor(8, 9, 13, 235))
 
-        # Big serif numeral / "GO"
-        font = QFont("Georgia", 220, QFont.Weight.Bold)
+        # Eyebrow above the number
+        eyebrow_font = QFont(FONT_MONO, 11)
+        eyebrow_font.setBold(True)
+        eyebrow_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 4)
+        p.setFont(eyebrow_font)
+        p.setPen(QColor(0, 224, 198, 220))
+        eyebrow_rect = self.rect().adjusted(0, 0, 0, 0)
+        eyebrow_rect.setHeight(self.rect().height() // 2 - 130)
+        p.drawText(
+            eyebrow_rect,
+            Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom,
+            "RECORDING IN",
+        )
+
+        # Big numeral / "GO"
+        font = QFont(FONT_DISPLAY, 240, QFont.Weight.Black)
+        font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, -6)
         p.setFont(font)
         color = QColor(ACCENT) if self._text == "GO" else QColor(TEXT_TITLE)
         p.setPen(color)
         p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self._text)
 
         # Hint text
-        p.setPen(QColor(160, 152, 144, 200))
-        hint_font = QFont("Courier New", 11)
-        hint_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 2)
+        p.setPen(QColor(138, 147, 168, 220))
+        hint_font = QFont(FONT_MONO, 10)
+        hint_font.setBold(True)
+        hint_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 3)
         p.setFont(hint_font)
         hint = "PRESS ESC TO CANCEL"
-        rect = self.rect().adjusted(0, 0, 0, -40)
-        p.drawText(rect, Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom, hint)
+        rect = self.rect().adjusted(0, 0, 0, -50)
+        p.drawText(
+            rect,
+            Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom,
+            hint,
+        )
 
         p.end()
 

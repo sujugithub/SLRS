@@ -27,6 +27,7 @@ from core import training_meta
 from gui.design import (
     ACCENT, BG_BASE, BG_DEEP, BG_ELEVATED, BG_SURFACE, HAIR,
     SUCCESS, WARNING, DANGER, TEXT_HINT, TEXT_PRIMARY, TEXT_SEC, TEXT_TITLE,
+    FONT_MONO, FONT_DISPLAY,
     GlassCard, HSep, OutlineButton, DangerButton, SectionLabel,
 )
 
@@ -37,7 +38,7 @@ def _chip(text: str, color: str) -> QLabel:
     lbl.setStyleSheet(
         f"QLabel {{ color: {color};"
         f" font-size: 10px;"
-        f" font-family: 'Courier New', monospace;"
+        f" font-family: '{FONT_MONO}', monospace;"
         f" letter-spacing: 1px;"
         f" border: 1px solid {color};"
         f" padding: 2px 8px;"
@@ -71,26 +72,16 @@ class ViewDialog(QWidget):
             f" border-bottom: 1px solid {HAIR};"
         )
         nav_lay = QHBoxLayout(nav)
-        nav_lay.setContentsMargins(20, 0, 20, 0)
+        nav_lay.setContentsMargins(28, 0, 28, 0)
         nav_lay.setSpacing(12)
 
-        back_btn = OutlineButton("← BACK")
-        back_btn.setFixedWidth(100)
-        back_btn.clicked.connect(self.back_requested.emit)
-        nav_lay.addWidget(back_btn)
-
-        title_lbl = QLabel("Trained Signs")
-        title_lbl.setStyleSheet(
-            f"font-size: 13px; font-weight: 600; color: {TEXT_TITLE};"
-            f" font-family: Georgia, 'Times New Roman', serif;"
-            " background: transparent; border: none;"
-        )
-        nav_lay.addWidget(title_lbl, 1)
+        nav_lay.addStretch(1)
 
         self._count_lbl = QLabel("")
         self._count_lbl.setStyleSheet(
             f"font-size: 10px; color: {TEXT_HINT};"
-            f" font-family: 'Courier New', monospace; letter-spacing: 1px;"
+            f" font-family: '{FONT_MONO}', monospace;"
+            f" letter-spacing: 2px; font-weight: 700;"
             " background: transparent; border: none;"
         )
         nav_lay.addWidget(self._count_lbl, 0, Qt.AlignmentFlag.AlignRight)
@@ -141,7 +132,7 @@ class ViewDialog(QWidget):
             empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
             empty.setStyleSheet(
                 f"font-size: 12px; color: {TEXT_HINT};"
-                f" font-family: 'Courier New', monospace; line-height: 1.6;"
+                f" font-family: '{FONT_MONO}', monospace; line-height: 1.6;"
                 " background: transparent; border: none; padding: 60px 0;"
             )
             self._inner_lay.insertWidget(0, empty)
@@ -188,7 +179,7 @@ class ViewDialog(QWidget):
         name_lbl = QLabel(sign.replace("_", " ").upper())
         name_lbl.setStyleSheet(
             f"font-size: 16px; color: {TEXT_TITLE};"
-            f" font-family: Georgia, 'Times New Roman', serif;"
+            f" font-family: '{FONT_DISPLAY}', sans-serif;"
             " background: transparent; border: none;"
         )
         name_lbl.setMinimumWidth(180)
