@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SignBridge — Gesture Control Demo</title>
+<style>
+  /* ─── Reset & base ─────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --accent: #6366f1;
+    --accent2: #22d3ee;
+    --bg: #05060a;
+    --surface: rgba(255,255,255,0.04);
+    --border: rgba(255,255,255,0.1);
+    --text: #e2e8f0;
+    --muted: #64748b;
+    font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  }
+  html { scroll-behavior: smooth; }
+  body { background: var(--bg); color: var(--text); min-height: 200vh; }
+
+  /* ─── Navbar ────────────────────────────────────────────── */
+  nav {
+    position: sticky; top: 0; z-index: 100;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 2rem; height: 60px;
+    background: rgba(5,6,10,0.8); backdrop-filter: blur(16px);
+    border-bottom: 1px solid var(--border);
+  }
+  .logo { font-weight: 800; font-size: 1.1rem; background: linear-gradient(90deg,#818cf8,#22d3ee); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .nav-links { display: flex; gap: 2rem; }
+  .nav-links a { color: #94a3b8; text-decoration: none; font-size: .9rem; transition: color .2s; }
+  .nav-links a:hover, .nav-links a.gesture-hover { color: #fff; }
+
+  /* ─── Hero ──────────────────────────────────────────────── */
+  .hero {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; padding: 5rem 2rem 4rem;
+    background: radial-gradient(ellipse 70% 40% at 50% 0%, rgba(99,102,241,.2), transparent 70%);
+  }
+  .hero h1 { font-size: clamp(2rem,5vw,3.5rem); font-weight: 900; line-height: 1.05; }
+  .hero p { margin-top: 1rem; color: #94a3b8; max-width: 520px; line-height: 1.7; }
+  .badge {
+    display: inline-flex; align-items: center; gap: .4rem;
+    border: 1px solid var(--border); background: var(--surface);
+    padding: .25rem .8rem; border-radius: 999px; font-size: .75rem; color: #94a3b8;
+    margin-bottom: 1.5rem;
+  }
+  .badge span { width: 7px; height: 7px; border-radius: 50%; background: var(--accent2); display: inline-block; }
+
+  /* ─── Cards section ─────────────────────────────────────── */
+  .section { padding: 4rem 2rem; max-width: 1100px; margin: 0 auto; }
+  .section-title { font-size: 1.5rem; font-weight: 700; margin-bottom: .5rem; }
+  .section-sub { color: var(--muted); margin-bottom: 2rem; font-size: .9rem; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px,1fr)); gap: 1.25rem; }
+  .card {
+    border: 1px solid var(--border); border-radius: 1.25rem;
+    background: var(--surface); padding: 1.75rem;
+    transition: border-color .2s, background .2s;
+  }
+  .card:hover, .card.gesture-hover { border-color: rgba(99,102,241,.5); background: rgba(99,102,241,.05); }
+  .card-icon { font-size: 2rem; margin-bottom: 1rem; }
+  .card h3 { font-size: 1rem; font-weight: 700; margin-bottom: .5rem; }
+  .card p { color: var(--muted); font-size: .875rem; line-height: 1.6; margin-bottom: 1.25rem; }
+  .btn {
+    display: inline-flex; align-items: center; gap: .4rem;
+    padding: .5rem 1.1rem; border-radius: 999px; font-size: .8rem; font-weight: 600;
+    cursor: pointer; transition: all .2s; border: none;
+  }
+  .btn-primary { background: linear-gradient(135deg,var(--accent),var(--accent2)); color: #05060a; }
+  .btn-primary:hover, .btn-primary.gesture-hover { filter: brightness(1.1); }
+  .btn-ghost { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+  .btn-ghost:hover, .btn-ghost.gesture-hover { background: rgba(255,255,255,.1); }
+
+  /* ─── Scroll section ────────────────────────────────────── */
+  .scroll-section { padding: 4rem 2rem; max-width: 1100px; margin: 0 auto; }
+  .gesture-table { width: 100%; border-collapse: collapse; font-size: .875rem; }
+  .gesture-table th { text-align: left; padding: .75rem 1rem; color: var(--muted); border-bottom: 1px solid var(--border); font-weight: 600; text-transform: uppercase; font-size: .7rem; letter-spacing: .08em; }
+  .gesture-table td { padding: .75rem 1rem; border-bottom: 1px solid rgba(255,255,255,.04); }
+  .gesture-table tr:hover td { background: var(--surface); }
+  .gesture-badge { display: inline-block; padding: .2rem .6rem; border-radius: .4rem; font-size: .75rem; font-weight: 600; }
+  .g-move  { background: rgba(99,102,241,.2); color: #818cf8; }
+  .g-click { background: rgba(34,211,238,.2); color: #22d3ee; }
+  .g-nav   { background: rgba(251,191,36,.2); color: #fbbf24; }
+  .g-scroll{ background: rgba(52,211,153,.2); color: #34d399; }
+  .g-sys   { background: rgba(248,113,113,.2); color: #f87171; }
+
+  /* ─── Footer ─────────────────────────────────────────────── */
+  footer { border-top: 1px solid var(--border); padding: 2rem; text-align: center; color: var(--muted); font-size: .8rem; margin-top: 4rem; }
+
+  /* ─── Virtual cursor ─────────────────────────────────────── */
+  #virtual-cursor {
+    position: fixed; top: 0; left: 0; pointer-events: none;
+    z-index: 99999; transform: translate(-50%, -50%);
+    transition: opacity .2s;
+    opacity: 0;
+  }
+  #virtual-cursor.active { opacity: 1; }
+  #virtual-cursor svg { filter: drop-shadow(0 0 6px rgba(99,102,241,.8)); }
+
+  /* ripple on click */
+  .cursor-ripple {
+    position: fixed; pointer-events: none; z-index: 99998;
+    width: 36px; height: 36px; border-radius: 50%;
+    border: 2px solid var(--accent2);
+    transform: translate(-50%,-50%) scale(0);
+    animation: ripple .4s ease-out forwards;
+  }
+  @keyframes ripple { to { transform: translate(-50%,-50%) scale(2.5); opacity: 0; } }
+
+  /* gesture-hover universal style */
+  .gesture-hover { outline: 2px solid rgba(99,102,241,.6) !important; outline-offset: 2px; }
+
+  /* ─── Overlay panel ──────────────────────────────────────── */
+  #gesture-panel {
+    position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 99990;
+    width: 210px;
+    background: rgba(10,12,20,0.85); backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(255,255,255,0.12); border-radius: 1.25rem;
+    padding: 1rem; user-select: none;
+    box-shadow: 0 8px 40px rgba(0,0,0,.5);
+  }
+  #gesture-panel .panel-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: .75rem; cursor: grab;
+  }
+  #gesture-panel .panel-header:active { cursor: grabbing; }
+  .panel-title { font-size: .75rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #94a3b8; }
+  .toggle-btn {
+    font-size: .7rem; padding: .2rem .55rem; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--surface); color: var(--text);
+    font-weight: 600; transition: all .15s;
+  }
+  .toggle-btn.on { background: rgba(99,102,241,.3); border-color: var(--accent); color: #a5b4fc; }
+  #video-container {
+    position: relative; width: 100%; aspect-ratio: 4/3;
+    border-radius: .75rem; overflow: hidden; background: #000; margin-bottom: .75rem;
+  }
+  #input-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); opacity: 0; }
+  #output-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .gesture-label {
+    font-size: .7rem; padding: .3rem .7rem; border-radius: .5rem;
+    background: rgba(255,255,255,.05); border: 1px solid var(--border);
+    display: flex; align-items: center; gap: .4rem;
+  }
+  .gesture-dot { width: 7px; height: 7px; border-radius: 50%; background: #374151; flex-shrink: 0; transition: background .2s; }
+  .gesture-dot.active { background: var(--accent2); box-shadow: 0 0 6px var(--accent2); }
+  .gesture-name { flex: 1; color: #e2e8f0; font-weight: 600; }
+  .gesture-status { color: var(--muted); font-size: .65rem; margin-top: .5rem; text-align: center; }
+  .cam-error { font-size: .72rem; color: #f87171; text-align: center; padding: .5rem; }
+</style>
+</head>
+<body>
+
+<!-- ─── Demo page ──────────────────────────────────────────── -->
+<nav>
+  <span class="logo">SignBridge</span>
+  <div class="nav-links">
+    <a href="#cards">Features</a>
+    <a href="#gestures">Gestures</a>
+    <a href="#footer">About</a>
+  </div>
+</nav>
+
+<section class="hero">
+  <div class="badge"><span></span> Gesture control enabled — try it!</div>
+  <h1>Control this page<br/><span style="background:linear-gradient(90deg,#818cf8,#22d3ee);-webkit-background-clip:text;-webkit-text-fill-color:transparent">with your hands.</span></h1>
+  <p>A browser-native gesture controller using MediaPipe Hands. Point, pinch, swipe, and scroll — no plugins, no installs.</p>
+</section>
+
+<div class="section" id="cards">
+  <div class="section-title">Interactive cards</div>
+  <div class="section-sub">Hover with your index finger, pinch to click a button.</div>
+  <div class="cards">
+    <div class="card">
+      <div class="card-icon">👁️</div>
+      <h3>Real-time detection</h3>
+      <p>MediaPipe Hands tracks 21 landmarks per hand at 30 FPS directly in the browser using WebAssembly.</p>
+      <button class="btn btn-primary" onclick="toast('Real-time detection clicked!')">Learn more →</button>
+    </div>
+    <div class="card">
+      <div class="card-icon">🖱️</div>
+      <h3>Virtual cursor</h3>
+      <p>Your index fingertip drives a smooth interpolated cursor that can hover and click any element on the page.</p>
+      <button class="btn btn-ghost" onclick="toast('Virtual cursor clicked!')">Try it out</button>
+    </div>
+    <div class="card">
+      <div class="card-icon">🤌</div>
+      <h3>Gesture vocabulary</h3>
+      <p>Eight gestures map to common interactions: point, pinch, swipe, scroll, pause, and toggle.</p>
+      <button class="btn btn-primary" onclick="toast('Gesture vocab clicked!')">View gestures ↓</button>
+    </div>
+  </div>
+</div>
+
+<div class="scroll-section" id="gestures">
+  <div class="section-title">Gesture reference</div>
+  <div class="section-sub">Scroll down with a fist, scroll up with two fingers.</div>
+  <table class="gesture-table">
+    <thead>
+      <tr>
+        <th>Gesture</th>
+        <th>Hand shape</th>
+        <th>Action</th>
+        <th>Type</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>Point</td><td>Index up, others curled</td><td>Move virtual cursor</td><td><span class="gesture-badge g-move">cursor</span></td></tr>
+      <tr><td>Pinch</td><td>Thumb + index close (&lt;6%)</td><td>Click element under cursor</td><td><span class="gesture-badge g-click">click</span></td></tr>
+      <tr><td>Open palm</td><td>All fingers extended, still</td><td>Pause / freeze cursor</td><td><span class="gesture-badge g-sys">system</span></td></tr>
+      <tr><td>Swipe left</td><td>Index pointing, fast ←</td><td>history.back()</td><td><span class="gesture-badge g-nav">navigate</span></td></tr>
+      <tr><td>Swipe right</td><td>Index pointing, fast →</td><td>history.forward()</td><td><span class="gesture-badge g-nav">navigate</span></td></tr>
+      <tr><td>Two fingers</td><td>Index + middle up</td><td>Scroll up</td><td><span class="gesture-badge g-scroll">scroll</span></td></tr>
+      <tr><td>Fist</td><td>All fingers curled</td><td>Scroll down</td><td><span class="gesture-badge g-scroll">scroll</span></td></tr>
+      <tr><td>Three fingers</td><td>Index + middle + ring up</td><td>Toggle gesture control</td><td><span class="gesture-badge g-sys">system</span></td></tr>
+    </tbody>
+  </table>
+
+  <!-- extra scroll content -->
+  <div style="margin-top:3rem; display:grid; gap:1rem;">
+    <div class="card" style="display:flex;gap:1rem;align-items:flex-start;">
+      <div style="font-size:1.5rem;flex-shrink:0">🧠</div>
+      <div><h3 style="margin-bottom:.4rem">Landmark geometry</h3><p style="color:var(--muted);font-size:.875rem;line-height:1.6">Finger extension is determined by comparing the Y-coordinate of each fingertip landmark to its PIP (proximal interphalangeal) joint. When the tip is above the PIP joint in normalised image coordinates, the finger is considered extended.</p></div>
+    </div>
+    <div class="card" style="display:flex;gap:1rem;align-items:flex-start;">
+      <div style="font-size:1.5rem;flex-shrink:0">⚡</div>
+      <div><h3 style="margin-bottom:.4rem">Swipe detection</h3><p style="color:var(--muted);font-size:.875rem;line-height:1.6">The last 10 X-positions of the index fingertip are buffered each frame. A swipe fires when the velocity (positional delta between oldest and newest samples) exceeds 0.04 normalised units per frame, giving snappy yet noise-resistant detection.</p></div>
+    </div>
+    <div class="card" style="display:flex;gap:1rem;align-items:flex-start;">
+      <div style="font-size:1.5rem;flex-shrink:0">🔇</div>
+      <div><h3 style="margin-bottom:.4rem">Debouncing</h3><p style="color:var(--muted);font-size:.875rem;line-height:1.6">Every gesture type is individually debounced at 800 ms so that holding a gesture doesn't fire the action dozens of times per second. The cursor-move gesture is exempt from debouncing since it needs to track continuously.</p></div>
+    </div>
+  </div>
+</div>
+
+<footer id="footer">
+  <p>SignBridge · Gesture Control Demo · Educational use only</p>
+</footer>
+
+<!-- ─── Virtual cursor ──────────────────────────────────────── -->
+<div id="virtual-cursor">
+  <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="14" cy="14" r="5" fill="white" opacity="0.95"/>
+    <circle cx="14" cy="14" r="8" stroke="rgba(99,102,241,1)" stroke-width="1.5" opacity="0.7"/>
+    <circle cx="14" cy="14" r="12" stroke="rgba(34,211,238,0.5)" stroke-width="1"/>
+  </svg>
+</div>
+
+<!-- ─── Overlay panel ──────────────────────────────────────── -->
+<div id="gesture-panel">
+  <div class="panel-header" id="panel-drag-handle">
+    <span class="panel-title">Gesture Control</span>
+    <button class="toggle-btn" id="toggle-btn" onclick="toggleGesture()">OFF</button>
+  </div>
+  <div id="video-container">
+    <video id="input-video" playsinline></video>
+    <canvas id="output-canvas"></canvas>
+  </div>
+  <div class="gesture-label">
+    <div class="gesture-dot" id="gesture-dot"></div>
+    <span class="gesture-name" id="gesture-name">—</span>
+  </div>
+  <div class="gesture-status" id="gesture-status">Click ON to start camera</div>
+</div>
+
+<!-- ─── Toast notification ─────────────────────────────────── -->
+<div id="toast" style="
+  position:fixed; bottom:5.5rem; left:50%; transform:translateX(-50%) translateY(20px);
+  background:rgba(10,12,20,0.9); border:1px solid var(--border); border-radius:.75rem;
+  padding:.6rem 1.2rem; font-size:.85rem; color:#e2e8f0; pointer-events:none;
+  opacity:0; transition:all .25s; z-index:99998; backdrop-filter:blur(12px);
+"></div>
+
+<!-- ─── MediaPipe CDN ─────────────────────────────────────── -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+<script>
+// ─── Toast helper ─────────────────────────────────────────
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.style.opacity = '1';
+  el.style.transform = 'translateX(-50%) translateY(0)';
+  clearTimeout(el._t);
+  el._t = setTimeout(() => {
+    el.style.opacity = '0';
+    el.style.transform = 'translateX(-50%) translateY(20px)';
+  }, 2200);
+}
+
+// ─── Panel dragging ───────────────────────────────────────
+(function() {
+  const panel = document.getElementById('gesture-panel');
+  const handle = document.getElementById('panel-drag-handle');
+  let dragging = false, ox = 0, oy = 0;
+  handle.addEventListener('mousedown', e => {
+    dragging = true;
+    const r = panel.getBoundingClientRect();
+    ox = e.clientX - r.left; oy = e.clientY - r.top;
+    document.body.style.userSelect = 'none';
+  });
+  window.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    panel.style.right = 'auto'; panel.style.bottom = 'auto';
+    panel.style.left = (e.clientX - ox) + 'px';
+    panel.style.top  = (e.clientY - oy) + 'px';
+  });
+  window.addEventListener('mouseup', () => { dragging = false; document.body.style.userSelect = ''; });
+})();
+
+// ─── State ─────────────────────────────────────────────────
+let gestureEnabled = false;
+let handsInstance = null;
+let cameraInstance = null;
+
+// cursor state
+const cursor = document.getElementById('virtual-cursor');
+let cursorX = window.innerWidth / 2, cursorY = window.innerHeight / 2;
+let targetX = cursorX, targetY = cursorY;
+let lastHovered = null;
+let cursorFrozen = false;
+let rafId = null;
+
+// swipe tracking
+const swipeBuffer = [];        // last 10 mirrored X values of landmark 8
+const SWIPE_BUFFER_SIZE = 10;
+const SWIPE_THRESHOLD = 0.04;
+
+// debounce map
+const lastFired = {};
+const DEBOUNCE_MS = 800;
+
+function canFire(gesture) {
+  const now = Date.now();
+  if (gesture === 'POINT') return true; // cursor tracking — no debounce
+  if ((now - (lastFired[gesture] || 0)) < DEBOUNCE_MS) return false;
+  lastFired[gesture] = now;
+  return true;
+}
+
+// ─── Gesture recognition ─────────────────────────────────
+function recogniseGesture(landmarks) {
+  // landmarks: array of {x,y,z} in [0,1] range (already mirrored X before this call)
+  const lm = landmarks;
+
+  // Finger extension: tip Y < PIP Y means extended (lower Y = higher in image)
+  const thumbExt  = lm[4].y  < lm[3].y;
+  const indexExt  = lm[8].y  < lm[6].y;
+  const middleExt = lm[12].y < lm[10].y;
+  const ringExt   = lm[16].y < lm[14].y;
+  const pinkyExt  = lm[20].y < lm[18].y;
+
+  const extCount = [thumbExt, indexExt, middleExt, ringExt, pinkyExt].filter(Boolean).length;
+
+  // Pinch: distance between thumb tip (4) and index tip (8)
+  const pinchDist = Math.hypot(lm[4].x - lm[8].x, lm[4].y - lm[8].y);
+  if (pinchDist < 0.06) return 'PINCH';
+
+  // Three fingers (index + middle + ring up, others curled) → toggle
+  if (indexExt && middleExt && ringExt && !thumbExt && !pinkyExt) return 'THREE_FINGERS';
+
+  // Two fingers (index + middle, others curled) → scroll up
+  if (indexExt && middleExt && !ringExt && !pinkyExt) return 'TWO_FINGERS';
+
+  // Open palm (all 5 extended) → pause
+  if (extCount === 5) return 'OPEN_PALM';
+
+  // Fist (none extended, or only thumb) → scroll down
+  if (!indexExt && !middleExt && !ringExt && !pinkyExt) return 'FIST';
+
+  // Swipe detection (index pointing)
+  if (indexExt && !middleExt && !ringExt && !pinkyExt) {
+    const x8 = lm[8].x;
+    swipeBuffer.push(x8);
+    if (swipeBuffer.length > SWIPE_BUFFER_SIZE) swipeBuffer.shift();
+    if (swipeBuffer.length === SWIPE_BUFFER_SIZE) {
+      const velocity = swipeBuffer[SWIPE_BUFFER_SIZE - 1] - swipeBuffer[0];
+      if (velocity > SWIPE_THRESHOLD) return 'SWIPE_RIGHT';
+      if (velocity < -SWIPE_THRESHOLD) return 'SWIPE_LEFT';
+    }
+    return 'POINT';
+  }
+
+  return 'NONE';
+}
+
+// ─── Action dispatcher ────────────────────────────────────
+function dispatchGesture(gesture, landmarks) {
+  if (!canFire(gesture)) return;
+
+  switch (gesture) {
+    case 'POINT':
+      if (!cursorFrozen) {
+        const mx = (1 - landmarks[8].x) * window.innerWidth;
+        const my = landmarks[8].y * window.innerHeight;
+        targetX = mx; targetY = my;
+      }
+      break;
+
+    case 'PINCH': {
+      const mx = (1 - landmarks[8].x) * window.innerWidth;
+      const my = landmarks[8].y * window.innerHeight;
+      targetX = mx; targetY = my;
+      const el = document.elementFromPoint(cursorX, cursorY);
+      if (el) {
+        el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+        spawnRipple(cursorX, cursorY);
+        toast('Pinch click!');
+      }
+      break;
+    }
+
+    case 'OPEN_PALM':
+      cursorFrozen = !cursorFrozen;
+      toast(cursorFrozen ? 'Cursor paused' : 'Cursor resumed');
+      break;
+
+    case 'SWIPE_LEFT':
+      swipeBuffer.length = 0;
+      toast('← Swipe left — history.back()');
+      history.back();
+      break;
+
+    case 'SWIPE_RIGHT':
+      swipeBuffer.length = 0;
+      toast('→ Swipe right — history.forward()');
+      history.forward();
+      break;
+
+    case 'TWO_FINGERS':
+      window.scrollBy({ top: -120, behavior: 'smooth' });
+      toast('↑ Scroll up');
+      break;
+
+    case 'FIST':
+      window.scrollBy({ top: 120, behavior: 'smooth' });
+      toast('↓ Scroll down');
+      break;
+
+    case 'THREE_FINGERS':
+      toggleGesture();
+      break;
+  }
+}
+
+// ripple effect on click
+function spawnRipple(x, y) {
+  const r = document.createElement('div');
+  r.className = 'cursor-ripple';
+  r.style.left = x + 'px'; r.style.top = y + 'px';
+  document.body.appendChild(r);
+  setTimeout(() => r.remove(), 450);
+}
+
+// ─── Cursor animation loop ────────────────────────────────
+function animateCursor() {
+  rafId = requestAnimationFrame(animateCursor);
+  if (!cursorFrozen) {
+    cursorX += (targetX - cursorX) * 0.2;
+    cursorY += (targetY - cursorY) * 0.2;
+  }
+  cursor.style.left = cursorX + 'px';
+  cursor.style.top  = cursorY + 'px';
+
+  // hover detection
+  const el = document.elementFromPoint(cursorX, cursorY);
+  if (el !== lastHovered) {
+    if (lastHovered) lastHovered.classList.remove('gesture-hover');
+    if (el && el !== document.getElementById('virtual-cursor') && el !== document.body) {
+      el.classList.add('gesture-hover');
+    }
+    lastHovered = el;
+  }
+}
+
+// ─── MediaPipe result handler ─────────────────────────────
+function onResults(results) {
+  const canvas = document.getElementById('output-canvas');
+  const ctx = canvas.getContext('2d');
+  const container = document.getElementById('video-container');
+  canvas.width  = container.offsetWidth;
+  canvas.height = container.offsetHeight;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+    setGestureLabel('—', false);
+    return;
+  }
+
+  const landmarks = results.multiHandLandmarks[0];
+
+  // Draw landmarks with manually mirrored X so they match the mirrored video feed
+  const mirroredForDraw = landmarks.map(lm => ({ x: 1 - lm.x, y: lm.y, z: lm.z }));
+  drawConnectors(ctx, mirroredForDraw, HAND_CONNECTIONS, { color: 'rgba(99,102,241,0.7)', lineWidth: 1.5 });
+  drawLandmarks(ctx, mirroredForDraw, { color: 'rgba(34,211,238,0.9)', lineWidth: 1, radius: 2 });
+
+  // Mirror X for gesture logic
+  const mirrored = landmarks.map(lm => ({ x: 1 - lm.x, y: lm.y, z: lm.z }));
+
+  const gesture = recogniseGesture(mirrored);
+  setGestureLabel(gesture === 'NONE' ? '—' : gesture.replace('_', ' '), gesture !== 'NONE');
+
+  if (gestureEnabled) dispatchGesture(gesture, mirrored);
+}
+
+function setGestureLabel(text, active) {
+  document.getElementById('gesture-name').textContent = text;
+  document.getElementById('gesture-dot').classList.toggle('active', active);
+}
+
+// ─── Toggle on/off ────────────────────────────────────────
+async function toggleGesture() {
+  const btn = document.getElementById('toggle-btn');
+  const status = document.getElementById('gesture-status');
+
+  if (!gestureEnabled) {
+    // Start
+    try {
+      if (!handsInstance) await initMediaPipe();
+      cursor.classList.add('active');
+      gestureEnabled = true;
+      btn.textContent = 'ON';
+      btn.classList.add('on');
+      status.textContent = 'Tracking…';
+      animateCursor();
+    } catch (err) {
+      console.error(err);
+      const container = document.getElementById('video-container');
+      container.innerHTML = '<div class="cam-error">Camera denied or unavailable.<br/>Check browser permissions.</div>';
+      status.textContent = 'Camera error';
+    }
+  } else {
+    // Stop
+    gestureEnabled = false;
+    btn.textContent = 'OFF';
+    btn.classList.remove('on');
+    cursor.classList.remove('active');
+    status.textContent = 'Paused';
+    if (lastHovered) { lastHovered.classList.remove('gesture-hover'); lastHovered = null; }
+    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+    if (cameraInstance) { cameraInstance.stop(); cameraInstance = null; }
+    handsInstance = null;
+    // Reset video container
+    const vc = document.getElementById('video-container');
+    vc.innerHTML = '<video id="input-video" playsinline></video><canvas id="output-canvas"></canvas>';
+    document.getElementById('input-video').style.opacity = '0';
+  }
+}
+
+// ─── MediaPipe init ───────────────────────────────────────
+async function initMediaPipe() {
+  const videoEl = document.getElementById('input-video');
+  const status  = document.getElementById('gesture-status');
+
+  status.textContent = 'Loading MediaPipe…';
+
+  handsInstance = new Hands({
+    locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+  });
+
+  handsInstance.setOptions({
+    maxNumHands: 1,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.7,
+    minTrackingConfidence: 0.6,
+  });
+
+  handsInstance.onResults(onResults);
+
+  status.textContent = 'Starting camera…';
+
+  await new Promise((resolve, reject) => {
+    cameraInstance = new Camera(videoEl, {
+      onFrame: async () => {
+        if (handsInstance) await handsInstance.send({ image: videoEl });
+      },
+      width: 320, height: 240,
+    });
+    cameraInstance.start()
+      .then(() => { status.textContent = 'Camera ready'; resolve(); })
+      .catch(reject);
+  });
+}
+</script>
+
+</body>
+</html>
