@@ -116,12 +116,12 @@ export default function GestureController() {
     switch (gesture) {
       case 'POINT':
         if (!frozen.current) {
-          targetX.current = (1 - lm[8].x) * window.innerWidth
+          targetX.current = lm[8].x * window.innerWidth
           targetY.current = lm[8].y * window.innerHeight
         }
         break
       case 'PINCH': {
-        targetX.current = (1 - lm[8].x) * window.innerWidth
+        targetX.current = lm[8].x * window.innerWidth
         targetY.current = lm[8].y * window.innerHeight
         const el = document.elementFromPoint(cursorX.current, cursorY.current)
         if (el) {
