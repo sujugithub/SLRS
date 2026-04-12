@@ -159,6 +159,60 @@ The repository includes platform build helpers and a PyInstaller spec:
 
 On Windows, use `build.bat` instead.
 
+## Landing Page
+
+A React + Tailwind demo site lives in the `landing/` folder.
+
+```bash
+cd landing
+npm install
+npm run dev      # http://localhost:5173
+npm run build    # production build → landing/dist/
+```
+
+**Sections:** Hero, Features, Recognition Pipeline, Tech Stack, Install guide.
+
+The landing page includes a built-in **browser gesture controller** (see below).
+
+## Browser Gesture Controller
+
+`gesture-control.html` is a standalone, zero-dependency demo page that controls the UI entirely via hand gestures detected in the browser using MediaPipe Hands.
+
+The same controller is embedded in the landing page as `landing/src/components/GestureController.tsx`.
+
+### Usage
+
+Serve the file over HTTP (camera requires a secure or localhost context):
+
+```bash
+python3 -m http.server 8080
+# open http://localhost:8080/gesture-control.html
+```
+
+Or use the landing page dev server (`npm run dev` inside `landing/`).
+
+Click **ON** in the bottom-right panel and allow camera access.
+
+### Gesture reference
+
+| Gesture | Hand shape | Action |
+|---|---|---|
+| Point | Index up, others curled | Move virtual cursor |
+| Pinch | Thumb + index close (<6%) | Click element under cursor |
+| Open palm | All fingers extended, held still | Pause / resume cursor |
+| Swipe left | Index pointing, fast ← | `history.back()` |
+| Swipe right | Index pointing, fast → | `history.forward()` |
+| Two fingers | Index + middle up | Scroll up |
+| Fist | All fingers curled | Scroll down |
+| Three fingers | Index + middle + ring up | Toggle gesture control on/off |
+
+### Tech
+
+- [MediaPipe Hands](https://cdn.jsdelivr.net/npm/@mediapipe/hands) via CDN — runs fully in the browser (WebAssembly), no server needed
+- Landmark X coordinates are mirrored for a natural selfie-view experience
+- Cursor movement uses lerp (factor 0.2) for smooth tracking
+- Each gesture type is debounced at 800 ms
+
 ## Notes
 
 - Despite legacy filenames such as `lstm_trainer.py` and `lstm_sign_model.keras`, the current dynamic classifier is a scikit-learn MLP, not a TensorFlow LSTM.
