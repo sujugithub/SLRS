@@ -159,21 +159,6 @@ The repository includes platform build helpers and a PyInstaller spec:
 
 On Windows, use `build.bat` instead.
 
-## Landing Page
-
-A React + Tailwind demo site lives in the `landing/` folder.
-
-```bash
-cd landing
-npm install
-npm run dev      # http://localhost:5173
-npm run build    # production build → landing/dist/
-```
-
-**Sections:** Hero, Features, Recognition Pipeline, Tech Stack, Install guide.
-
-The landing page includes a built-in **browser gesture controller** (see below).
-
 ## Browser Gesture Controller
 
 `gesture-control.html` is a standalone, zero-dependency demo page that controls the UI entirely via hand gestures detected in the browser using MediaPipe Hands.
